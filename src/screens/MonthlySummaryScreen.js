@@ -66,13 +66,15 @@ export default function MonthlySummaryScreen({
     loadSummary();
   }, [selectedYearMonth, selectedAreaFilter, deliveries, masters]);
 
-  const filteredCustomerSummaries = summaryData.customerSummaries.filter((c) => {
-    const matchesSearch =
-      c.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (c.phone && c.phone.includes(searchQuery));
-    const matchesArea = selectedAreaFilter === 'all' || c.areaId === selectedAreaFilter;
-    return matchesSearch && matchesArea;
-  });
+  const filteredCustomerSummaries = summaryData.customerSummaries
+    .filter((c) => {
+      const matchesSearch =
+        c.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.phone && c.phone.includes(searchQuery));
+      const matchesArea = selectedAreaFilter === 'all' || c.areaId === selectedAreaFilter;
+      return matchesSearch && matchesArea;
+    })
+    .sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.customerName || '').localeCompare(b.customerName || ''));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -254,7 +256,7 @@ export default function MonthlySummaryScreen({
                     onPress={() => onSelectCustomerBill(c.customerId, selectedYearMonth)}
                     activeOpacity={0.7}
                   >
-                    <Text style={[styles.tableCell, styles.colIndex]}>{idx + 1}</Text>
+                    <Text style={[styles.tableCell, styles.colIndex]}>{c.sequence || idx + 1}</Text>
                     <View style={[styles.tableCell, styles.colName]}>
                       <Text style={styles.customerNameText}>{c.customerName}</Text>
                       <Text style={styles.customerSubText}>Tap to view bill ➔</Text>

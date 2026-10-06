@@ -75,14 +75,17 @@ export const storageService = {
   async getCustomers(areaId = null) {
     try {
       const customers = await apiService.getCustomers(areaId);
+      if (Array.isArray(customers)) {
+        return customers.sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
+      }
       return customers;
     } catch (e) {
       const masters = await this.getMasters();
-      const customers = masters.customers || [];
+      let customers = masters.customers || [];
       if (areaId && areaId !== 'all') {
-        return customers.filter(c => c.areaId === areaId);
+        customers = customers.filter(c => c.areaId === areaId);
       }
-      return customers;
+      return customers.sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
     }
   },
 
@@ -104,14 +107,72 @@ export const storageService = {
           customers.push(customerData);
         }
       } else {
+        const areaCusts = customers.filter(c => c.areaId === (customerData.areaId || 'area-1'));
+        const maxSeq = areaCusts.reduce((max, c) => Math.max(max, c.sequence || 0), 0);
         const newCustomer = {
           ...customerData,
           id: `cust-${Date.now()}`,
+          sequence: customerData.sequence !== undefined ? customerData.sequence : (maxSeq + 1),
           active: true,
         };
         customers.push(newCustomer);
       }
 
+      customers.sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
+      masters.customers = customers;
+      await this.saveMasters(masters);
+      return masters.customers;
+    }
+  },
+
+  async reorderCustomers(payload) {
+    try {
+      const res = await apiService.reorderCustomers(payload);
+      const masters = await this.getMasters();
+      if (res && res.customers) {
+        // If area-specific reordering, merge with other areas
+        if (payload.areaId && payload.areaId !== 'all') {
+          const otherCustomers = (masters.customers || []).filter(c => c.areaId !== payload.areaId);
+          masters.customers = [...otherCustomers, ...res.customers].sort(
+            (a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || '')
+          );
+        } else {
+          masters.customers = res.customers;
+        }
+        await AsyncStorage.setItem(KEYS.MASTERS, JSON.stringify(masters));
+        return masters.customers;
+      }
+      return masters.customers || [];
+    } catch (e) {
+      console.warn('Failed to reorder customers on backend, updating locally:', e);
+      const masters = await this.getMasters();
+      let customers = [...(masters.customers || [])];
+
+      if (payload.customerIds && Array.isArray(payload.customerIds)) {
+        const idToSeq = {};
+        payload.customerIds.forEach((id, idx) => {
+          idToSeq[id] = idx + 1;
+        });
+        customers = customers.map(c => {
+          if (idToSeq[c.id] !== undefined) {
+            return { ...c, sequence: idToSeq[c.id] };
+          }
+          return c;
+        });
+      } else if (payload.items && Array.isArray(payload.items)) {
+        const idToSeq = {};
+        payload.items.forEach(item => {
+          if (item.id) idToSeq[item.id] = Number(item.sequence) || 0;
+        });
+        customers = customers.map(c => {
+          if (idToSeq[c.id] !== undefined) {
+            return { ...c, sequence: idToSeq[c.id] };
+          }
+          return c;
+        });
+      }
+
+      customers.sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
       masters.customers = customers;
       await this.saveMasters(masters);
       return masters.customers;

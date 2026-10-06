@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
+import CalendarModal from '../components/CalendarModal';
 import { getTodayIso, formatDisplayDate } from '../utils/dateUtils';
 import CircleLoader, { LoadingOverlay } from '../components/CircleLoader';
 
@@ -26,6 +27,7 @@ export default function AddEntryScreen({
   onRefresh,
 }) {
   const [selectedDate, setSelectedDate] = useState(getTodayIso());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const selectedShift = currentUser?.shift || 'Morning'; // Shift set during Login
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -58,8 +60,13 @@ export default function AddEntryScreen({
       ? 'All Areas'
       : selectedAreaObj?.name?.split(' - ')[0] || selectedAreaFilter.toUpperCase();
 
+  // Sort customers by sequence number first, then name
+  const sortedCustomers = [...allCustomers].sort(
+    (a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || '')
+  );
+
   // Filter customers by selected area and search query
-  const filteredCustomers = allCustomers.filter((c) => {
+  const filteredCustomers = sortedCustomers.filter((c) => {
     const matchesArea = selectedAreaFilter === 'all' || c.areaId === selectedAreaFilter;
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -224,6 +231,7 @@ export default function AddEntryScreen({
         title="Milk Delivery Entry"
         rightBadgeText={`${formatDisplayDate(selectedDate)} • ${selectedShift}`}
         rightBadgeIcon={selectedShift === 'Morning' ? 'sunny' : 'moon'}
+        onRightBadgePress={() => setIsCalendarOpen(true)}
         showBack={Boolean(onBack)}
         onBack={onBack}
         subtitle={`Area: ${selectedAreaName} | ${currentUser?.name || 'Staff'}`}
@@ -236,10 +244,15 @@ export default function AddEntryScreen({
             <Ionicons name="chevron-back" size={18} color="#0060AF" />
             <Text style={styles.dateNavBtnText}>Prev Day</Text>
           </TouchableOpacity>
-          <View style={styles.currentDateBadge}>
+          <TouchableOpacity
+            style={styles.currentDateBadge}
+            onPress={() => setIsCalendarOpen(true)}
+            activeOpacity={0.7}
+          >
             <Ionicons name="calendar" size={16} color="#0060AF" style={{ marginRight: 6 }} />
             <Text style={styles.currentDateText}>{formatDisplayDate(selectedDate)}</Text>
-          </View>
+            <Ionicons name="chevron-down" size={13} color="#0060AF" style={{ marginLeft: 4 }} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.dateNavBtn} onPress={() => changeDateByDays(1)}>
             <Text style={styles.dateNavBtnText}>Next Day</Text>
             <Ionicons name="chevron-forward" size={18} color="#0060AF" />
@@ -470,7 +483,7 @@ export default function AddEntryScreen({
 
                   return (
                     <View key={cust.id} style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}>
-                      <Text style={[styles.tableCell, styles.colIndex]}>{idx + 1}</Text>
+                      <Text style={[styles.tableCell, styles.colIndex]}>{cust.sequence || idx + 1}</Text>
 
                       <View style={[styles.tableCell, styles.colName]}>
                         <Text style={styles.customerNameText}>{cust.name}</Text>
@@ -671,6 +684,15 @@ export default function AddEntryScreen({
           </View>
         </Modal>
       )}
+
+      {/* Calendar Date Picker Modal */}
+      <CalendarModal
+        visible={isCalendarOpen}
+        selectedDate={selectedDate}
+        onSelectDate={(newDate) => setSelectedDate(newDate)}
+        onClose={() => setIsCalendarOpen(false)}
+        deliveries={deliveries}
+      />
     </SafeAreaView>
   );
 }

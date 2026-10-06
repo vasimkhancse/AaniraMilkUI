@@ -3,14 +3,14 @@ import { Platform } from 'react-native';
 // In Expo/React Native, determine API host based on environment
 const getBaseUrl = () => {
   if (Platform.OS === 'web') {
-    return 'http://localhost:5000/api';
+    return 'https://aaniramilkapi.onrender.com/api';
   }
   if (Platform.OS === 'android') {
     // Android emulator alias for host machine localhost
-    return 'http://10.209.9.86:5000/api';
+    return 'https://aaniramilkapi.onrender.com/api';
   }
   // iOS simulator or default
-  return 'http://localhost:5000/api';
+  return 'https://aaniramilkapi.onrender.com/api';
 };
 
 export const API_BASE_URL = getBaseUrl();
@@ -129,6 +129,13 @@ export const apiService = {
   async deleteCustomer(id) {
     return request(`/customers/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  async reorderCustomers(payload) {
+    return request('/customers/reorder', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 

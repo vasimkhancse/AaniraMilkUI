@@ -51,13 +51,24 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   };
 
   // Form states for Customer Add/Edit
+  const [custAreaFilter, setCustAreaFilter] = useState('all');
+  const [custSearchQuery, setCustSearchQuery] = useState('');
   const [custName, setCustName] = useState('');
   const [custPhone, setCustPhone] = useState('');
   const [custAreaId, setCustAreaId] = useState('area-1');
   const [custMorningQty, setCustMorningQty] = useState('1.0');
   const [custEveningQty, setCustEveningQty] = useState('0.5');
   const [custPricePerLiter, setCustPricePerLiter] = useState('60');
+  const [custSequence, setCustSequence] = useState('1');
   const [custModalError, setCustModalError] = useState('');
+
+  // Reorder / Sort by Sequence Modal States
+  const [reorderModalVisible, setReorderModalVisible] = useState(false);
+  const [reorderAreaId, setReorderAreaId] = useState(masters?.areas?.[0]?.id || 'area-1');
+  const [reorderList, setReorderList] = useState([]);
+  const [isSavingReorder, setIsSavingReorder] = useState(false);
+  const [draggedCustIndex, setDraggedCustIndex] = useState(null);
+  const [dragOverCustIndex, setDragOverCustIndex] = useState(null);
 
   // Rate master state
   const [baseMilkRate, setBaseMilkRate] = useState(String(masters?.milkRatePerLiter || 60));
@@ -67,14 +78,22 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   const [newUserArea, setNewUserArea] = useState(masters?.areas?.[0]?.id || 'area-1');
   const [isUserAreaDropdownOpen, setIsUserAreaDropdownOpen] = useState(false);
 
-  const openAddCustomer = () => {
+  const openAddCustomer = (preselectedAreaId = null) => {
     setEditingCustomer(null);
     setCustName('');
     setCustPhone('');
-    setCustAreaId(masters?.areas?.[0]?.id || 'area-1');
+    const fallbackArea = masters?.areas?.[0]?.id || 'area-1';
+    const targetArea = preselectedAreaId || (custAreaFilter !== 'all' ? custAreaFilter : fallbackArea);
+    setCustAreaId(targetArea);
     setCustMorningQty('1.0');
     setCustEveningQty('0.0');
     setCustPricePerLiter(String(masters?.milkRatePerLiter || 60));
+    
+    // Suggest next sequence number for this area
+    const areaCusts = (masters?.customers || []).filter(c => c.areaId === targetArea);
+    const maxSeq = areaCusts.reduce((max, c) => Math.max(max, Number(c.sequence) || 0), 0);
+    setCustSequence(String(maxSeq + 1));
+    
     setCustModalError('');
     setCustomerModalVisible(true);
   };
@@ -89,6 +108,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
     setCustMorningQty(String(c.defaultMorningQty ?? 1.0));
     setCustEveningQty(String(c.defaultEveningQty ?? 0.0));
     setCustPricePerLiter(String(c.pricePerLiter || masters?.milkRatePerLiter || 60));
+    setCustSequence(String(c.sequence || 1));
     setCustModalError('');
     setCustomerModalVisible(true);
   };
@@ -122,6 +142,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
         defaultMorningQty: parseFloat(custMorningQty) || 0,
         defaultEveningQty: parseFloat(custEveningQty) || 0,
         pricePerLiter: parseFloat(custPricePerLiter) || 60,
+        sequence: parseInt(custSequence, 10) || 1,
         active: true,
       };
 
@@ -151,6 +172,107 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       console.warn('Error deleting customer:', e);
     } finally {
       setIsDeletingCustomerId(null);
+    }
+  };
+
+  // Reorder Modal Actions
+  const openReorderModal = (preselectedAreaId = null) => {
+    const areaId = preselectedAreaId || (custAreaFilter !== 'all' ? custAreaFilter : (masters?.areas?.[0]?.id || 'area-1'));
+    setReorderAreaId(areaId);
+    const areaCusts = (masters?.customers || [])
+      .filter((c) => c.areaId === areaId)
+      .sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
+    setReorderList(areaCusts);
+    setDraggedCustIndex(null);
+    setDragOverCustIndex(null);
+    setReorderModalVisible(true);
+  };
+
+  const handleSwitchReorderArea = (newAreaId) => {
+    setReorderAreaId(newAreaId);
+    const areaCusts = (masters?.customers || [])
+      .filter((c) => c.areaId === newAreaId)
+      .sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
+    setReorderList(areaCusts);
+    setDraggedCustIndex(null);
+    setDragOverCustIndex(null);
+  };
+
+  const moveCustomer = (fromIndex, toIndex) => {
+    if (toIndex < 0 || toIndex >= reorderList.length || fromIndex === toIndex) return;
+    const updated = [...reorderList];
+    const [movedItem] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, movedItem);
+    setReorderList(updated);
+  };
+
+  const moveToTop = (index) => {
+    if (index === 0) return;
+    moveCustomer(index, 0);
+  };
+
+  const moveToBottom = (index) => {
+    if (index === reorderList.length - 1) return;
+    moveCustomer(index, reorderList.length - 1);
+  };
+
+  const sortReorderAlphabetical = () => {
+    const sorted = [...reorderList].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    setReorderList(sorted);
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedCustIndex(index);
+    if (e && e.dataTransfer) {
+      e.dataTransfer.setData('text/plain', String(index));
+      e.dataTransfer.effectAllowed = 'move';
+    }
+  };
+
+  const handleDragOver = (e, index) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (dragOverCustIndex !== index) {
+      setDragOverCustIndex(index);
+    }
+  };
+
+  const handleDrop = (e, dropIndex) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const sourceIndex = draggedCustIndex !== null
+      ? draggedCustIndex
+      : parseInt(e?.dataTransfer?.getData('text/plain'), 10);
+    if (!isNaN(sourceIndex) && sourceIndex !== dropIndex) {
+      moveCustomer(sourceIndex, dropIndex);
+    }
+    setDraggedCustIndex(null);
+    setDragOverCustIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedCustIndex(null);
+    setDragOverCustIndex(null);
+  };
+
+  const handleSaveReorder = async () => {
+    setIsSavingReorder(true);
+    try {
+      const customerIds = reorderList.map((c) => c.id);
+      const updatedCustomers = await storageService.reorderCustomers({
+        areaId: reorderAreaId,
+        customerIds,
+      });
+      onUpdateMasters({
+        ...masters,
+        customers: updatedCustomers,
+      });
+      const areaName = (masters?.areas || []).find(a => a.id === reorderAreaId)?.name || 'area';
+      setSyncStatus(`Sequence updated for ${areaName}`);
+      setReorderModalVisible(false);
+      setTimeout(() => setSyncStatus(''), 2500);
+    } catch (err) {
+      console.warn('Error saving customer sequence:', err);
+    } finally {
+      setIsSavingReorder(false);
     }
   };
 
@@ -444,90 +566,368 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
         ) : (
           <>
             {/* TAB 1: CUSTOMERS MASTER */}
-            {activeTab === 'customers' && (
-              <View>
-                <View style={styles.sectionHeaderRow}>
-                  <View>
-                    <Text style={styles.sectionTitle}>Customer Master & Defaults</Text>
-                    <Text style={styles.sectionSubtitle}>
-                      Add customer profiles 
-                    </Text>
-                  </View>
-                  <TouchableOpacity style={styles.addBtn} onPress={openAddCustomer}>
-                    <Ionicons name="add" size={18} color="#FFFFFF" />
-                    <Text style={styles.addBtnText}>Add New</Text>
-                  </TouchableOpacity>
-                </View>
+            {activeTab === 'customers' && (() => {
+              const allCusts = masters?.customers || [];
+              const allAreas = masters?.areas || [];
 
-                {(masters?.customers || []).length === 0 ? (
-                  <View style={styles.emptyCard}>
-                    <Ionicons name="people-outline" size={40} color="#94A3B8" style={{ marginBottom: 8 }} />
-                    <Text style={styles.emptyCardTitle}>No customers added yet</Text>
-                    <Text style={styles.emptyCardSub}>
-                      Add your first customer by tapping the "+ Add New" button above.
-                    </Text>
-                    <TouchableOpacity style={styles.addBtnLarge} onPress={openAddCustomer}>
-                      <Ionicons name="add" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.addBtnText}>Add Customer</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  (masters?.customers || []).map((c) => {
-                    const area = (masters?.areas || []).find((a) => a.id === c.areaId);
-                    const isDeleting = isDeletingCustomerId === c.id;
-                    return (
-                      <View key={c.id} style={styles.cardItem}>
-                        <View style={styles.cardItemLeft}>
-                          <View style={styles.avatarMini}>
-                            <Text style={styles.avatarMiniText}>{c.name.slice(0, 1).toUpperCase()}</Text>
-                          </View>
-                          <View>
-                            <Text style={styles.cardItemTitle}>{c.name}</Text>
-                            <Text style={styles.cardItemSubtitle}>
-                              {c.phone || 'No phone'} • {area?.name || c.areaId}
-                            </Text>
-                            <View style={styles.behaviorRow}>
-                              <View style={styles.behaviorBadge}>
-                                <Text style={styles.behaviorBadgeText}>
-                                  ☀️ M: {c.defaultMorningQty ?? 1}L
-                                </Text>
-                              </View>
-                              <View style={styles.behaviorBadge}>
-                                <Text style={styles.behaviorBadgeText}>
-                                  🌙 E: {c.defaultEveningQty ?? 0}L
-                                </Text>
-                              </View>
-                              <Text style={styles.rateBadgeText}>₹{c.pricePerLiter || 60}/L</Text>
-                            </View>
-                          </View>
+              // Filter by search query
+              const matchesSearch = (c) => {
+                if (!custSearchQuery.trim()) return true;
+                const q = custSearchQuery.toLowerCase().trim();
+                const nameMatch = (c.name || '').toLowerCase().includes(q);
+                const phoneMatch = (c.phone || '').includes(q);
+                return nameMatch || phoneMatch;
+              };
+
+              // Identify distinct areas to display
+              const areasToDisplay =
+                custAreaFilter === 'all'
+                  ? allAreas
+                  : allAreas.filter((a) => a.id === custAreaFilter);
+
+              // Unassigned customers
+              const knownAreaIds = new Set(allAreas.map((a) => a.id));
+              const unassignedCusts = allCusts.filter(
+                (c) => !knownAreaIds.has(c.areaId) && matchesSearch(c)
+              );
+
+              const totalFilteredCustomers = allCusts.filter(
+                (c) =>
+                  (custAreaFilter === 'all' || c.areaId === custAreaFilter) && matchesSearch(c)
+              ).length;
+
+              const renderCustomerCard = (c, area) => {
+                const isDeleting = isDeletingCustomerId === c.id;
+                return (
+                  <View key={c.id} style={styles.cardItem}>
+                    <View style={styles.cardItemLeft}>
+                      <View style={styles.avatarMiniWrap}>
+                        <View style={styles.avatarMini}>
+                          <Text style={styles.avatarMiniText}>
+                            {(c.name || 'C').slice(0, 1).toUpperCase()}
+                          </Text>
                         </View>
-
-                        <View style={styles.cardActions}>
-                          <TouchableOpacity
-                            style={styles.iconActionBtn}
-                            onPress={() => openEditCustomer(c)}
-                            disabled={isDeleting}
-                          >
-                            <Ionicons name="pencil" size={18} color="#0060AF" />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.iconActionBtn}
-                            onPress={() => handleDeleteCustomer(c.id)}
-                            disabled={isDeleting}
-                          >
-                            {isDeleting ? (
-                              <CircleLoader size="small" color="#DC2626" />
-                            ) : (
-                              <Ionicons name="trash-outline" size={18} color="#DC2626" />
-                            )}
-                          </TouchableOpacity>
+                        <View style={styles.seqNumberBadge}>
+                          <Text style={styles.seqNumberBadgeText}>#{c.sequence || 1}</Text>
                         </View>
                       </View>
-                    );
-                  })
-                )}
-              </View>
-            )}
+                      <View style={{ flex: 1, marginLeft: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={styles.cardItemTitle}>{c.name}</Text>
+                          <View style={styles.seqInlinePill}>
+                            <Text style={styles.seqInlinePillText}>Seq {c.sequence || 1}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.cardItemSubtitle}>
+                          {c.phone || 'No phone'} • {area?.shortName || area?.name?.split(' - ')[0] || c.areaId}
+                        </Text>
+                        <View style={styles.behaviorRow}>
+                          <View style={styles.behaviorBadge}>
+                            <Text style={styles.behaviorBadgeText}>
+                              ☀️ M: {c.defaultMorningQty ?? 1}L
+                            </Text>
+                          </View>
+                          <View style={styles.behaviorBadge}>
+                            <Text style={styles.behaviorBadgeText}>
+                              🌙 E: {c.defaultEveningQty ?? 0}L
+                            </Text>
+                          </View>
+                          <Text style={styles.rateBadgeText}>₹{c.pricePerLiter || 60}/L</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity
+                        style={styles.iconActionBtn}
+                        onPress={() => openEditCustomer(c)}
+                        disabled={isDeleting}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="pencil" size={17} color="#0060AF" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconActionBtn}
+                        onPress={() => handleDeleteCustomer(c.id)}
+                        disabled={isDeleting}
+                        activeOpacity={0.7}
+                      >
+                        {isDeleting ? (
+                          <CircleLoader size="small" color="#DC2626" />
+                        ) : (
+                          <Ionicons name="trash-outline" size={17} color="#DC2626" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              };
+
+              return (
+                <View>
+                  {/* Top Bar with Title and Add / Sort Buttons */}
+                  <View style={styles.sectionHeaderRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.sectionTitle}>Customer Master (Area-wise)</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      {allCusts.length > 0 && (
+                        <TouchableOpacity
+                          style={styles.reorderHeaderBtn}
+                          onPress={() => openReorderModal(custAreaFilter !== 'all' ? custAreaFilter : null)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="swap-vertical" size={16} color="#0060AF" />
+                          <Text style={styles.reorderHeaderBtnText}>Sort Order</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={styles.addBtn}
+                        onPress={() => openAddCustomer(custAreaFilter !== 'all' ? custAreaFilter : null)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="add" size={18} color="#FFFFFF" />
+                        <Text style={styles.addBtnText}>Add New</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Customer Search Bar */}
+                  <View style={styles.custSearchContainer}>
+                    <Ionicons name="search" size={16} color="#64748B" style={styles.custSearchIcon} />
+                    <TextInput
+                      style={styles.custSearchInput}
+                      placeholder="Search by customer name or phone..."
+                      placeholderTextColor="#94A3B8"
+                      value={custSearchQuery}
+                      onChangeText={setCustSearchQuery}
+                    />
+                    {custSearchQuery ? (
+                      <TouchableOpacity onPress={() => setCustSearchQuery('')} style={styles.custSearchClear}>
+                        <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  {/* Area Filter Tabs Horizontal Scroll */}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.areaFilterBar}
+                  >
+                    <TouchableOpacity
+                      style={[
+                        styles.areaFilterChip,
+                        custAreaFilter === 'all' && styles.areaFilterChipActive,
+                      ]}
+                      onPress={() => setCustAreaFilter('all')}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.areaFilterChipText,
+                          custAreaFilter === 'all' && styles.areaFilterChipTextActive,
+                        ]}
+                      >
+                        All Areas ({allCusts.length})
+                      </Text>
+                    </TouchableOpacity>
+
+                    {allAreas.map((area) => {
+                      const count = allCusts.filter((c) => c.areaId === area.id).length;
+                      const isActive = custAreaFilter === area.id;
+                      return (
+                        <TouchableOpacity
+                          key={area.id}
+                          style={[styles.areaFilterChip, isActive && styles.areaFilterChipActive]}
+                          onPress={() => setCustAreaFilter(area.id)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name="location"
+                            size={12}
+                            color={isActive ? '#FFFFFF' : '#0060AF'}
+                            style={{ marginRight: 4 }}
+                          />
+                          <Text
+                            style={[
+                              styles.areaFilterChipText,
+                              isActive && styles.areaFilterChipTextActive,
+                            ]}
+                          >
+                            {area.shortName || area.name.split(' - ')[0]} ({count})
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {allCusts.length === 0 ? (
+                    <View style={styles.emptyCard}>
+                      <Ionicons
+                        name="people-outline"
+                        size={40}
+                        color="#94A3B8"
+                        style={{ marginBottom: 8 }}
+                      />
+                      <Text style={styles.emptyCardTitle}>No customers added yet</Text>
+                      <Text style={styles.emptyCardSub}>
+                        Add your first customer by tapping the "+ Add New" button above.
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.addBtnLarge}
+                        onPress={() => openAddCustomer()}
+                      >
+                        <Ionicons name="add" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.addBtnText}>Add Customer</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : totalFilteredCustomers === 0 ? (
+                    <View style={styles.emptyCard}>
+                      <Ionicons
+                        name="search-outline"
+                        size={36}
+                        color="#94A3B8"
+                        style={{ marginBottom: 6 }}
+                      />
+                      <Text style={styles.emptyCardTitle}>No matching customers found</Text>
+                      <Text style={styles.emptyCardSub}>
+                        No customers match "{custSearchQuery}" in {custAreaFilter === 'all' ? 'any area' : 'this area'}.
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.addBtnLarge, { backgroundColor: '#E2E8F0' }]}
+                        onPress={() => {
+                          setCustSearchQuery('');
+                          setCustAreaFilter('all');
+                        }}
+                      >
+                        <Text style={[styles.addBtnText, { color: '#334155' }]}>Clear Search & Filters</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <>
+                      {/* Area Grouped Sections */}
+                      {areasToDisplay.map((area) => {
+                        const areaCustomers = allCusts
+                          .filter((c) => c.areaId === area.id && matchesSearch(c))
+                          .sort((a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || ''));
+
+                        if (areaCustomers.length === 0 && custSearchQuery) {
+                          // Skip empty areas when searching
+                          return null;
+                        }
+
+                        const totalM = areaCustomers.reduce(
+                          (sum, c) => sum + (Number(c.defaultMorningQty) || 0),
+                          0
+                        );
+                        const totalE = areaCustomers.reduce(
+                          (sum, c) => sum + (Number(c.defaultEveningQty) || 0),
+                          0
+                        );
+
+                        return (
+                          <View key={area.id} style={styles.areaGroupContainer}>
+                            {/* Area Header */}
+                            <View style={styles.areaGroupHeader}>
+                              <View style={styles.areaGroupHeaderLeft}>
+                                <View style={styles.areaGroupPinBubble}>
+                                  <Ionicons name="location" size={16} color="#0060AF" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <View style={styles.areaGroupTitleRow}>
+                                    <Text style={styles.areaGroupTitle}>{area.name}</Text>
+                                    <View style={styles.areaGroupCountBadge}>
+                                      <Text style={styles.areaGroupCountText}>
+                                        {areaCustomers.length} {areaCustomers.length === 1 ? 'Customer' : 'Customers'}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                  <Text style={styles.areaGroupDemandSummary}>
+                                    ☀️ Morning: {totalM.toFixed(1)}L  •  🌙 Evening: {totalE.toFixed(1)}L
+                                  </Text>
+                                </View>
+                              </View>
+
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                {areaCustomers.length > 1 && (
+                                  <TouchableOpacity
+                                    style={styles.areaGroupSortBtn}
+                                    onPress={() => openReorderModal(area.id)}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Ionicons name="swap-vertical" size={13} color="#0060AF" />
+                                    <Text style={styles.areaGroupSortBtnText}>Sort Order</Text>
+                                  </TouchableOpacity>
+                                )}
+                                <TouchableOpacity
+                                  style={styles.areaGroupAddBtn}
+                                  onPress={() => openAddCustomer(area.id)}
+                                  activeOpacity={0.7}
+                                >
+                                  <Ionicons name="add" size={14} color="#0060AF" />
+                                  <Text style={styles.areaGroupAddBtnText}>Add</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+
+                            {/* Customer Cards in Area */}
+                            {areaCustomers.length === 0 ? (
+                              <View style={styles.areaEmptyBox}>
+                                <Text style={styles.areaEmptyText}>No customers in {area.name} yet</Text>
+                                <TouchableOpacity
+                                  style={styles.areaEmptyAddBtn}
+                                  onPress={() => openAddCustomer(area.id)}
+                                >
+                                  <Ionicons
+                                    name="add-circle-outline"
+                                    size={15}
+                                    color="#0060AF"
+                                    style={{ marginRight: 4 }}
+                                  />
+                                  <Text style={styles.areaEmptyAddBtnText}>
+                                    Add Customer to {area.shortName || area.name.split(' - ')[0]}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <View style={styles.areaCustomerCardsWrap}>
+                                {areaCustomers.map((c) => renderCustomerCard(c, area))}
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
+
+                      {/* Unassigned / Other Customers */}
+                      {(custAreaFilter === 'all' || custAreaFilter === 'unassigned') &&
+                        unassignedCusts.length > 0 && (
+                          <View style={styles.areaGroupContainer}>
+                            <View style={[styles.areaGroupHeader, { borderColor: '#FDE68A' }]}>
+                              <View style={styles.areaGroupHeaderLeft}>
+                                <View style={[styles.areaGroupPinBubble, { backgroundColor: '#FEF3C7' }]}>
+                                  <Ionicons name="help-circle" size={16} color="#D97706" />
+                                </View>
+                                <View>
+                                  <Text style={styles.areaGroupTitle}>Unassigned Area Customers</Text>
+                                  <Text style={styles.areaGroupDemandSummary}>
+                                    {unassignedCusts.length} customers with unassigned area ID
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                            <View style={styles.areaCustomerCardsWrap}>
+                              {unassignedCusts.map((c) =>
+                                renderCustomerCard(c, { name: 'Unassigned Area', shortName: 'Other' })
+                              )}
+                            </View>
+                          </View>
+                        )}
+                    </>
+                  )}
+                </View>
+              );
+            })()}
 
             {/* TAB 2: RATES & QUANTITY PRESETS */}
             {activeTab === 'rates' && (
@@ -972,6 +1372,16 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                 onChangeText={setCustPricePerLiter}
               />
 
+              <Text style={styles.inputLabelModal}>Delivery Sequence Order #</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="e.g. 1, 2, 3"
+                placeholderTextColor="#94A3B8"
+                keyboardType="numeric"
+                value={custSequence}
+                onChangeText={setCustSequence}
+              />
+
               <TouchableOpacity
                 style={[styles.saveCustomerBtn, isSavingCustomer && styles.btnDisabled]}
                 onPress={handleSaveCustomer}
@@ -989,6 +1399,172 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                 )}
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Customer Drag & Drop / Reorder Sequence Modal */}
+      <Modal transparent animationType="slide" visible={reorderModalVisible}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.reorderModalCard]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={styles.reorderHeaderIconBadge}>
+                  <Ionicons name="swap-vertical" size={18} color="#0060AF" />
+                </View>
+                <View>
+                  <Text style={styles.modalTitle}>Sort Customer Sequence</Text>
+                  <Text style={styles.reorderModalSubtitle}>
+                    Drag & drop or use arrows to set delivery order
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setReorderModalVisible(false)} disabled={isSavingReorder}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Area Filter Selector Pills inside Modal */}
+            <View style={styles.reorderAreaTabsWrap}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reorderAreaTabsBar}>
+                {(masters?.areas || []).map((area) => {
+                  const isSelected = reorderAreaId === area.id;
+                  const count = (masters?.customers || []).filter(c => c.areaId === area.id).length;
+                  return (
+                    <TouchableOpacity
+                      key={area.id}
+                      style={[styles.reorderAreaTab, isSelected && styles.reorderAreaTabActive]}
+                      onPress={() => handleSwitchReorderArea(area.id)}
+                    >
+                      <Ionicons
+                        name="location"
+                        size={12}
+                        color={isSelected ? '#FFFFFF' : '#0060AF'}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={[styles.reorderAreaTabText, isSelected && styles.reorderAreaTabTextActive]}>
+                        {area.shortName || area.name.split(' - ')[0]} ({count})
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Modal Quick Actions Bar */}
+            <View style={styles.reorderQuickBar}>
+              <Text style={styles.reorderCountText}>
+                {reorderList.length} customer{reorderList.length === 1 ? '' : 's'} in this route
+              </Text>
+              {reorderList.length > 1 && (
+                <TouchableOpacity
+                  style={styles.reorderQuickActionBtn}
+                  onPress={sortReorderAlphabetical}
+                >
+                  <Ionicons name="text-outline" size={13} color="#0060AF" style={{ marginRight: 4 }} />
+                  <Text style={styles.reorderQuickActionText}>Sort A-Z</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Customer Reorder List */}
+            <ScrollView style={styles.reorderScrollContainer} bounces={false}>
+              {reorderList.length === 0 ? (
+                <View style={styles.reorderEmptyBox}>
+                  <Ionicons name="people-outline" size={36} color="#94A3B8" style={{ marginBottom: 6 }} />
+                  <Text style={styles.reorderEmptyTitle}>No customers in this area</Text>
+                  <Text style={styles.reorderEmptySub}>
+                    Select another area from the tabs above or add customers to this area.
+                  </Text>
+                </View>
+              ) : (
+                reorderList.map((cust, idx) => {
+                  const isDragging = draggedCustIndex === idx;
+                  const isOver = dragOverCustIndex === idx;
+                  const isFirst = idx === 0;
+                  const isLast = idx === reorderList.length - 1;
+
+                  return (
+                    <View
+                      key={cust.id}
+                      style={[
+                        styles.reorderItemCard,
+                        isDragging && styles.reorderItemDragging,
+                        isOver && styles.reorderItemDragOver,
+                      ]}
+                      // HTML5 Drag & Drop props for Web
+                      draggable={true}
+                      onDragStart={(e) => handleDragStart(e, idx)}
+                      onDragOver={(e) => handleDragOver(e, idx)}
+                      onDrop={(e) => handleDrop(e, idx)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      {/* Sequence Badge */}
+                      <View style={styles.reorderSeqBubble}>
+                        <Text style={styles.reorderSeqBubbleText}>{idx + 1}</Text>
+                      </View>
+
+                      {/* Customer Info */}
+                      <View style={styles.reorderItemInfo}>
+                        <Text style={styles.reorderItemName}>{cust.name}</Text>
+                        <Text style={styles.reorderItemSub}>
+                          {cust.phone || 'No phone'} • ☀️ {cust.defaultMorningQty ?? 1}L | 🌙 {cust.defaultEveningQty ?? 0}L
+                        </Text>
+                      </View>
+
+                      {/* Move Actions: Up, Down, Drag Handle */}
+                      <View style={styles.reorderBtnGroup}>
+                        <TouchableOpacity
+                          style={[styles.reorderStepBtn, isFirst && styles.reorderStepBtnDisabled]}
+                          onPress={() => moveCustomer(idx, idx - 1)}
+                          disabled={isFirst}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="arrow-up" size={16} color={isFirst ? '#CBD5E1' : '#0060AF'} />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.reorderStepBtn, isLast && styles.reorderStepBtnDisabled]}
+                          onPress={() => moveCustomer(idx, idx + 1)}
+                          disabled={isLast}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="arrow-down" size={16} color={isLast ? '#CBD5E1' : '#0060AF'} />
+                        </TouchableOpacity>
+
+                        <View style={styles.reorderDragHandle} title="Drag to reorder">
+                          <Ionicons name="reorder-three" size={20} color="#64748B" />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            {/* Save Reorder Button */}
+            {reorderList.length > 0 && (
+              <View style={styles.reorderFooter}>
+                <TouchableOpacity
+                  style={[styles.reorderSaveBtn, isSavingReorder && styles.btnDisabled]}
+                  onPress={handleSaveReorder}
+                  disabled={isSavingReorder}
+                  activeOpacity={0.85}
+                >
+                  {isSavingReorder ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <CircleLoader size="small" color="#FFFFFF" />
+                      <Text style={styles.reorderSaveBtnText}>Updating Sequence...</Text>
+                    </View>
+                  ) : (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <Ionicons name="checkmark-done" size={18} color="#FFFFFF" />
+                      <Text style={styles.reorderSaveBtnText}>Save Sequence Order</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -1216,6 +1792,170 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
+  },
+  custSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+    marginBottom: 10,
+  },
+  custSearchIcon: {
+    marginRight: 8,
+  },
+  custSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0F172A',
+    height: '100%',
+  },
+  custSearchClear: {
+    padding: 4,
+  },
+  areaFilterBar: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  areaFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+  },
+  areaFilterChipActive: {
+    backgroundColor: '#0060AF',
+    borderColor: '#0060AF',
+  },
+  areaFilterChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  areaFilterChipTextActive: {
+    color: '#FFFFFF',
+  },
+  areaGroupContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  areaGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  areaGroupHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+  },
+  areaGroupPinBubble: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  areaGroupTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  areaGroupTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  areaGroupCountBadge: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  areaGroupCountText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0060AF',
+  },
+  areaGroupDemandSummary: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  areaGroupAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    gap: 4,
+    marginLeft: 8,
+  },
+  areaGroupAddBtnText: {
+    color: '#0060AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  areaCustomerCardsWrap: {
+    padding: 10,
+  },
+  areaEmptyBox: {
+    padding: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  areaEmptyText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  areaEmptyAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  areaEmptyAddBtnText: {
+    fontSize: 12,
+    color: '#0060AF',
+    fontWeight: '700',
   },
   addBtn: {
     flexDirection: 'row',
@@ -1728,5 +2468,265 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  avatarMiniWrap: {
+    position: 'relative',
+  },
+  seqNumberBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: '#0060AF',
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  seqNumberBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  seqInlinePill: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  seqInlinePillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0060AF',
+  },
+  reorderHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: '#0060AF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  reorderHeaderBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0060AF',
+  },
+  areaGroupSortBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  areaGroupSortBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0060AF',
+  },
+  reorderModalCard: {
+    maxHeight: '90%',
+    width: '94%',
+    maxWidth: 560,
+    paddingBottom: 14,
+  },
+  reorderHeaderIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderModalSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  reorderAreaTabsWrap: {
+    marginVertical: 10,
+  },
+  reorderAreaTabsBar: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  reorderAreaTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  reorderAreaTabActive: {
+    backgroundColor: '#0060AF',
+    borderColor: '#0060AF',
+  },
+  reorderAreaTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  reorderAreaTabTextActive: {
+    color: '#FFFFFF',
+  },
+  reorderQuickBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+    marginBottom: 8,
+  },
+  reorderCountText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  reorderQuickActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  reorderQuickActionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0060AF',
+  },
+  reorderScrollContainer: {
+    maxHeight: 380,
+  },
+  reorderItemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+    cursor: 'grab',
+  },
+  reorderItemDragging: {
+    opacity: 0.5,
+    borderColor: '#0060AF',
+    backgroundColor: '#F0F9FF',
+  },
+  reorderItemDragOver: {
+    borderColor: '#0284C7',
+    borderWidth: 2,
+    backgroundColor: '#EFF6FF',
+    transform: [{ scale: 1.02 }],
+  },
+  reorderSeqBubble: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#0060AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  reorderSeqBubbleText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  reorderItemInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  reorderItemName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  reorderItemSub: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  reorderBtnGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  reorderStepBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderStepBtnDisabled: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    opacity: 0.5,
+  },
+  reorderDragHandle: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reorderFooter: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  reorderSaveBtn: {
+    backgroundColor: '#0060AF',
+    borderRadius: 10,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderSaveBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  reorderEmptyBox: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderEmptyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  reorderEmptySub: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 4,
+    paddingHorizontal: 16,
   },
 });
