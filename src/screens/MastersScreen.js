@@ -113,6 +113,21 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
     setCustomerModalVisible(true);
   };
 
+  const handleSelectCustArea = (newAreaId) => {
+    setCustAreaId(newAreaId);
+    if (editingCustomer && editingCustomer.areaId === newAreaId) {
+      // Reverted to original area: restore existing sequence
+      setCustSequence(String(editingCustomer.sequence || 1));
+    } else {
+      // Calculate next sequence for the newly selected area
+      const areaCusts = (masters?.customers || []).filter(
+        (c) => c.areaId === newAreaId && (!editingCustomer || c.id !== editingCustomer.id)
+      );
+      const maxSeq = areaCusts.reduce((max, c) => Math.max(max, Number(c.sequence) || 0), 0);
+      setCustSequence(String(maxSeq + 1));
+    }
+  };
+
   const handleSaveCustomer = async () => {
     const trimmedName = custName.trim();
     if (!trimmedName) {
@@ -614,9 +629,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                       <View style={{ flex: 1, marginLeft: 6 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <Text style={styles.cardItemTitle}>{c.name}</Text>
-                          <View style={styles.seqInlinePill}>
-                            <Text style={styles.seqInlinePillText}>Seq {c.sequence || 1}</Text>
-                          </View>
+                          
                         </View>
                         <Text style={styles.cardItemSubtitle}>
                           {c.phone || 'No phone'} • {area?.shortName || area?.name?.split(' - ')[0] || c.areaId}
@@ -1327,7 +1340,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                     <TouchableOpacity
                       key={area.id}
                       style={[styles.areaSelectBtn, isSelected && styles.areaSelectBtnActive]}
-                      onPress={() => setCustAreaId(area.id)}
+                      onPress={() => handleSelectCustArea(area.id)}
                     >
                       <Text
                         style={[
@@ -1372,15 +1385,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                 onChangeText={setCustPricePerLiter}
               />
 
-              <Text style={styles.inputLabelModal}>Delivery Sequence Order #</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 1, 2, 3"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={custSequence}
-                onChangeText={setCustSequence}
-              />
+              
 
               <TouchableOpacity
                 style={[styles.saveCustomerBtn, isSavingCustomer && styles.btnDisabled]}
