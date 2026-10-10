@@ -146,6 +146,19 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       return;
     }
 
+    // Check for duplicate phone number in existing customers
+    const duplicatePhoneCustomer = (masters?.customers || []).find(
+      (c) =>
+        (!editingCustomer || c.id !== editingCustomer.id) &&
+        c.phone &&
+        c.phone.replace(/[^0-9]/g, '').slice(-10) === cleanPhone
+    );
+
+    if (duplicatePhoneCustomer) {
+      setCustModalError(`Phone number is already registered to customer "${duplicatePhoneCustomer.name}"`);
+      return;
+    }
+
     setCustModalError('');
     setIsSavingCustomer(true);
     try {
@@ -169,7 +182,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       setCustomerModalVisible(false);
     } catch (e) {
       console.warn('Error saving customer:', e);
-      setCustModalError('Failed to save customer to database. Please try again.');
+      setCustModalError(e.message || 'Failed to save customer to database. Please try again.');
     } finally {
       setIsSavingCustomer(false);
     }

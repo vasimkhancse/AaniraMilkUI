@@ -95,10 +95,30 @@ export const storageService = {
       const masters = await this.getMasters();
       return masters.customers || [];
     } catch (e) {
+      const errMsg = (e.message || '').toLowerCase();
+      if (
+        errMsg.includes('already registered') ||
+        errMsg.includes('phone') ||
+        errMsg.includes('required') ||
+        errMsg.includes('exists') ||
+        errMsg.includes('unique')
+      ) {
+        throw e;
+      }
       console.warn('Failed to save customer to backend, saving locally:', e);
       const masters = await this.getMasters();
       let customers = [...(masters.customers || [])];
       
+      const cleanPhone = (customerData.phone || '').replace(/[^0-9]/g, '').slice(-10);
+      if (cleanPhone) {
+        const dup = customers.find(
+          c => (!customerData.id || c.id !== customerData.id) && (c.phone || '').replace(/[^0-9]/g, '').slice(-10) === cleanPhone
+        );
+        if (dup) {
+          throw new Error(`Phone number is already registered to customer "${dup.name}"`);
+        }
+      }
+
       if (customerData.id) {
         const index = customers.findIndex(c => c.id === customerData.id);
         if (index >= 0) {

@@ -65,24 +65,41 @@ export default function AddEntryScreen({
     (a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || '')
   );
 
-  // Filter customers by selected area and search query
+  // Filter customers by selected area, search query, and quantity > 0 for the selected shift
   const filteredCustomers = sortedCustomers.filter((c) => {
     const matchesArea = selectedAreaFilter === 'all' || c.areaId === selectedAreaFilter;
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.phone && c.phone.includes(searchQuery));
-    return matchesArea && matchesSearch;
+    if (!matchesArea || !matchesSearch) return false;
+
+    // Check if customer has a quantity > 0 for this shift (Morning or Evening)
+    const isMorning = (selectedShift || '').toLowerCase() === 'morning';
+    const defaultShiftQty = isMorning
+      ? Number(c.defaultMorningQty ?? 0)
+      : Number(c.defaultEveningQty ?? 0);
+
+    // Check if an existing saved delivery with qty > 0 exists for this customer on this date and shift
+    const hasPositiveSavedEntry = (deliveries || []).some((d) => {
+      const dateMatches = d.date && d.date.slice(0, 10) === selectedDate.slice(0, 10);
+      const shiftMatches =
+        (d.shift || '').trim().toLowerCase() === (selectedShift || '').trim().toLowerCase();
+      return dateMatches && shiftMatches && d.customerId === c.id && Number(d.qty || 0) > 0;
+    });
+
+    return defaultShiftQty > 0 || hasPositiveSavedEntry;
   });
 
   // Map of customer ID to customer Area
   const customerAreaMap = new Map(allCustomers.map((c) => [c.id, c.areaId]));
 
-  // Check if entries are already saved for this DATE, SHIFT, AND AREA
+  // Check if entries are already saved for this DATE, SHIFT, AND AREA (positive quantities only)
   const existingDeliveriesForShiftAndArea = (deliveries || []).filter((d) => {
     const dateMatches = d.date && d.date.slice(0, 10) === selectedDate.slice(0, 10);
     const shiftMatches =
       (d.shift || '').trim().toLowerCase() === (selectedShift || '').trim().toLowerCase();
     if (!dateMatches || !shiftMatches) return false;
+    if (Number(d.qty || 0) <= 0) return false;
 
     const custArea = d.areaId || customerAreaMap.get(d.customerId);
     if (selectedAreaFilter !== 'all') {
@@ -103,17 +120,20 @@ export default function AddEntryScreen({
       return dateMatches && shiftMatches;
     });
 
+    const isMorning = (selectedShift || '').toLowerCase() === 'morning';
+
     allCustomers.forEach((cust) => {
       const match = existing.find((e) => e.customerId === cust.id);
-      if (match) {
+      if (match && Number(match.qty) > 0) {
         newEntries[cust.id] = {
           qty: Number(match.qty),
           rate: match.rate || cust.pricePerLiter || baseRate,
         };
       } else {
         // Customer default behavior
-        const defaultQty =
-          selectedShift === 'Morning' ? cust.defaultMorningQty ?? 1.0 : cust.defaultEveningQty ?? 0.5;
+        const defaultQty = isMorning
+          ? Number(cust.defaultMorningQty ?? 0)
+          : Number(cust.defaultEveningQty ?? 0);
         newEntries[cust.id] = {
           qty: defaultQty,
           rate: cust.pricePerLiter || baseRate,
@@ -212,12 +232,21 @@ export default function AddEntryScreen({
 
   const handleResetToSaved = () => {
     const resetMap = { ...entriesMap };
+    const isMorning = (selectedShift || '').toLowerCase() === 'morning';
     allCustomers.forEach((cust) => {
       const match = existingDeliveriesForShiftAndArea.find((e) => e.customerId === cust.id);
-      if (match) {
+      if (match && Number(match.qty) > 0) {
         resetMap[cust.id] = {
           qty: Number(match.qty),
           rate: match.rate || cust.pricePerLiter || baseRate,
+        };
+      } else {
+        const defaultQty = isMorning
+          ? Number(cust.defaultMorningQty ?? 0)
+          : Number(cust.defaultEveningQty ?? 0);
+        resetMap[cust.id] = {
+          qty: defaultQty,
+          rate: cust.pricePerLiter || baseRate,
         };
       }
     });
@@ -365,6 +394,7 @@ export default function AddEntryScreen({
 
             <View style={styles.savedTable}>
               <View style={styles.savedTableHeader}>
+                <Text style={[styles.savedColHead, { width: 32, textAlign: 'center' }]}>#</Text>
                 <Text style={[styles.savedColHead, { flex: 1.2 }]}>Customer</Text>
                 <Text style={[styles.savedColHead, { width: 70, textAlign: 'center' }]}>Qty (L)</Text>
                 <Text style={[styles.savedColHead, { width: 75, textAlign: 'right' }]}>Amount</Text>
@@ -372,6 +402,9 @@ export default function AddEntryScreen({
 
               {existingDeliveriesForShiftAndArea.map((del, idx) => (
                 <View key={del.id || idx} style={[styles.savedTableRow, idx % 2 === 1 && styles.savedTableRowAlt]}>
+                  <Text style={[styles.savedCellText, { width: 32, textAlign: 'center', color: '#64748B', fontWeight: '700' }]}>
+                    {idx + 1}
+                  </Text>
                   <Text style={[styles.savedCellText, { flex: 1.2, fontWeight: '700' }]}>
                     {del.customerName || 'Customer'}
                   </Text>
@@ -483,7 +516,7 @@ export default function AddEntryScreen({
 
                   return (
                     <View key={cust.id} style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}>
-                      <Text style={[styles.tableCell, styles.colIndex]}>{cust.sequence || idx + 1}</Text>
+                      <Text style={[styles.tableCell, styles.colIndex]}>{idx + 1}</Text>
 
                       <View style={[styles.tableCell, styles.colName]}>
                         <Text style={styles.customerNameText}>{cust.name}</Text>
