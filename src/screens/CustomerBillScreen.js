@@ -77,6 +77,15 @@ export default function CustomerBillScreen({
   const totalMilk = billData?.totalMilk || 0;
   const totalAmount = billData?.totalAmount || 0;
 
+  // Helper to determine UPI payment phone number based on customer area ID
+  const getPaymentPhone = () => {
+    const custArea = String(customer?.areaId || customer?.area_id || currentCustObj?.areaId || currentCustObj?.area_id || '').toLowerCase().trim();
+    if (custArea === 'area-1' || custArea === 'area1' || custArea === '1' || custArea === 'area_1') {
+      return '+91 88832 66445';
+    }
+    return '+91 97901 66445';
+  };
+
   // Generate formatted WhatsApp message text
   const generateWhatsAppMessage = () => {
     const rawLines = entries.map(
@@ -84,6 +93,7 @@ export default function CustomerBillScreen({
     );
     const summaryLines = rawLines.slice(0, 15).join('\n');
     const moreText = entries.length > 15 ? `\n...and ${entries.length - 15} more deliveries` : '';
+    const paymentPhone = getPaymentPhone();
 
     return `🥛 *AANIRA MILK & MILK PRODUCTS* 🥛
 📍 *Kovaipudur, Coimbatore*
@@ -100,7 +110,7 @@ ${summaryLines}${moreText}
 💰 *TOTAL AMOUNT DUE:* ₹${totalAmount.toLocaleString('en-IN')}
 ----------------------------------
 💳 *Payment Methods:*
-• Google Pay / PhonePe / Paytm: +91 99440 00000
+• Google Pay / PhonePe / Paytm: ${paymentPhone}
 • Cash on Delivery
 
 🙏 _Thank you for choosing Aanira Milk! Have a healthy day._`;
