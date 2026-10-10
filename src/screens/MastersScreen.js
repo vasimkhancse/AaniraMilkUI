@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   SafeAreaView,
   Modal,
   Alert,
+  Platform,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
@@ -64,6 +66,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
 
   // Reorder / Sort by Sequence Modal States
   const [reorderModalVisible, setReorderModalVisible] = useState(false);
+  const [isReorderFullscreen, setIsReorderFullscreen] = useState(true);
   const [reorderAreaId, setReorderAreaId] = useState(masters?.areas?.[0]?.id || 'area-1');
   const [reorderList, setReorderList] = useState([]);
   const [isSavingReorder, setIsSavingReorder] = useState(false);
@@ -227,58 +230,113 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   };
 
   const moveCustomer = (fromIndex, toIndex) => {
-    if (toIndex < 0 || toIndex >= reorderList.length || fromIndex === toIndex) return;
-    const updated = [...reorderList];
-    const [movedItem] = updated.splice(fromIndex, 1);
-    updated.splice(toIndex, 0, movedItem);
-    setReorderList(updated);
+    setReorderList((prevList) => {
+      if (toIndex < 0 || toIndex >= prevList.length || fromIndex === toIndex) return prevList;
+      const updated = [...prevList];
+      const [movedItem] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedItem);
+      return updated;
+    });
   };
 
   const moveToTop = (index) => {
-    if (index === 0) return;
     moveCustomer(index, 0);
   };
 
   const moveToBottom = (index) => {
-    if (index === reorderList.length - 1) return;
-    moveCustomer(index, reorderList.length - 1);
+    setReorderList((prevList) => {
+      if (index === prevList.length - 1) return prevList;
+      const updated = [...prevList];
+      const [movedItem] = updated.splice(index, 1);
+      updated.push(movedItem);
+      return updated;
+    });
   };
 
   const sortReorderAlphabetical = () => {
-    const sorted = [...reorderList].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    setReorderList(sorted);
+    setReorderList((prevList) => {
+      return [...prevList].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    });
   };
 
-  const handleDragStart = (e, index) => {
+  const dragSourceIdxRef = useRef(null);
+  const dragOverIdxRef = useRef(null);
+
+  const handleDragStart = useCallback((index) => {
+    dragSourceIdxRef.current = index;
+    dragOverIdxRef.current = null;
     setDraggedCustIndex(index);
-    if (e && e.dataTransfer) {
-      e.dataTransfer.setData('text/plain', String(index));
-      e.dataTransfer.effectAllowed = 'move';
-    }
-  };
+  }, []);
 
-  const handleDragOver = (e, index) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (dragOverCustIndex !== index) {
+  const handleDragOver = useCallback((index) => {
+    if (dragOverIdxRef.current !== index) {
+      dragOverIdxRef.current = index;
       setDragOverCustIndex(index);
     }
-  };
+  }, []);
 
-  const handleDrop = (e, dropIndex) => {
-    if (e && e.preventDefault) e.preventDefault();
-    const sourceIndex = draggedCustIndex !== null
-      ? draggedCustIndex
-      : parseInt(e?.dataTransfer?.getData('text/plain'), 10);
-    if (!isNaN(sourceIndex) && sourceIndex !== dropIndex) {
-      moveCustomer(sourceIndex, dropIndex);
+  const handleDrop = useCallback((sourceIdx, dropIndex) => {
+    const fromIdx = !isNaN(sourceIdx) && sourceIdx !== null ? sourceIdx : dragSourceIdxRef.current;
+    if (fromIdx !== null && fromIdx !== undefined && !isNaN(fromIdx) && fromIdx !== dropIndex) {
+      moveCustomer(fromIdx, dropIndex);
     }
+    dragSourceIdxRef.current = null;
+    dragOverIdxRef.current = null;
     setDraggedCustIndex(null);
     setDragOverCustIndex(null);
-  };
+  }, []);
 
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
+    dragSourceIdxRef.current = null;
+    dragOverIdxRef.current = null;
     setDraggedCustIndex(null);
     setDragOverCustIndex(null);
+  }, []);
+
+  const handleTouchHandleStart = (index, e) => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof document === 'undefined') return;
+    const touch = e?.nativeEvent?.touches ? e.nativeEvent.touches[0] : (e?.touches ? e.touches[0] : null);
+    if (!touch) return;
+
+    dragSourceIdxRef.current = index;
+    dragOverIdxRef.current = index;
+    setDraggedCustIndex(index);
+    setDragOverCustIndex(index);
+
+    const onWindowTouchMove = (moveEvt) => {
+      const curTouch = moveEvt.touches ? moveEvt.touches[0] : null;
+      if (!curTouch) return;
+      if (moveEvt.cancelable) moveEvt.preventDefault();
+
+      const elem = document.elementFromPoint(curTouch.clientX, curTouch.clientY);
+      const card = elem?.closest ? elem.closest('[data-reorder-index]') : null;
+      if (card) {
+        const targetIdx = parseInt(card.getAttribute('data-reorder-index'), 10);
+        if (!isNaN(targetIdx) && dragOverIdxRef.current !== targetIdx) {
+          dragOverIdxRef.current = targetIdx;
+          setDragOverCustIndex(targetIdx);
+        }
+      }
+    };
+
+    const onWindowTouchEnd = () => {
+      const fromIdx = dragSourceIdxRef.current;
+      const toIdx = dragOverIdxRef.current;
+      if (fromIdx !== null && toIdx !== null && fromIdx !== toIdx) {
+        moveCustomer(fromIdx, toIdx);
+      }
+      dragSourceIdxRef.current = null;
+      dragOverIdxRef.current = null;
+      setDraggedCustIndex(null);
+      setDragOverCustIndex(null);
+      window.removeEventListener('touchmove', onWindowTouchMove);
+      window.removeEventListener('touchend', onWindowTouchEnd);
+      window.removeEventListener('touchcancel', onWindowTouchEnd);
+    };
+
+    window.addEventListener('touchmove', onWindowTouchMove, { passive: false });
+    window.addEventListener('touchend', onWindowTouchEnd);
+    window.addEventListener('touchcancel', onWindowTouchEnd);
   };
 
   const handleSaveReorder = async () => {
@@ -1423,23 +1481,42 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
 
       {/* Customer Drag & Drop / Reorder Sequence Modal */}
       <Modal transparent animationType="slide" visible={reorderModalVisible}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, styles.reorderModalCard]}>
+        <View style={[styles.modalOverlay, styles.reorderModalOverlay]}>
+          <View style={[styles.modalCard, styles.reorderModalCard, isReorderFullscreen && styles.reorderModalCardFullscreen]}>
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
                 <View style={styles.reorderHeaderIconBadge}>
                   <Ionicons name="swap-vertical" size={18} color="#0060AF" />
                 </View>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.modalTitle}>Sort Customer Sequence</Text>
                   <Text style={styles.reorderModalSubtitle}>
                     Drag & drop or use arrows to set delivery order
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => setReorderModalVisible(false)} disabled={isSavingReorder}>
-                <Ionicons name="close" size={24} color="#64748B" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  onPress={() => setIsReorderFullscreen(!isReorderFullscreen)}
+                  style={styles.reorderHeaderIconBtn}
+                  title={isReorderFullscreen ? "Restore smaller view" : "Expand to full view"}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={isReorderFullscreen ? "contract-outline" : "expand-outline"}
+                    size={18}
+                    color="#64748B"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setReorderModalVisible(false)}
+                  disabled={isSavingReorder}
+                  style={styles.reorderHeaderIconBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close" size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Area Filter Selector Pills inside Modal */}
@@ -1496,67 +1573,24 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                   </Text>
                 </View>
               ) : (
-                reorderList.map((cust, idx) => {
-                  const isDragging = draggedCustIndex === idx;
-                  const isOver = dragOverCustIndex === idx;
-                  const isFirst = idx === 0;
-                  const isLast = idx === reorderList.length - 1;
-
-                  return (
-                    <View
-                      key={cust.id}
-                      style={[
-                        styles.reorderItemCard,
-                        isDragging && styles.reorderItemDragging,
-                        isOver && styles.reorderItemDragOver,
-                      ]}
-                      // HTML5 Drag & Drop props for Web
-                      draggable={true}
-                      onDragStart={(e) => handleDragStart(e, idx)}
-                      onDragOver={(e) => handleDragOver(e, idx)}
-                      onDrop={(e) => handleDrop(e, idx)}
-                      onDragEnd={handleDragEnd}
-                    >
-                      {/* Sequence Badge */}
-                      <View style={styles.reorderSeqBubble}>
-                        <Text style={styles.reorderSeqBubbleText}>{idx + 1}</Text>
-                      </View>
-
-                      {/* Customer Info */}
-                      <View style={styles.reorderItemInfo}>
-                        <Text style={styles.reorderItemName}>{cust.name}</Text>
-                        <Text style={styles.reorderItemSub}>
-                          {cust.phone || 'No phone'} • ☀️ {cust.defaultMorningQty ?? 1}L | 🌙 {cust.defaultEveningQty ?? 0}L
-                        </Text>
-                      </View>
-
-                      {/* Move Actions: Up, Down, Drag Handle */}
-                      <View style={styles.reorderBtnGroup}>
-                        <TouchableOpacity
-                          style={[styles.reorderStepBtn, isFirst && styles.reorderStepBtnDisabled]}
-                          onPress={() => moveCustomer(idx, idx - 1)}
-                          disabled={isFirst}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="arrow-up" size={16} color={isFirst ? '#CBD5E1' : '#0060AF'} />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[styles.reorderStepBtn, isLast && styles.reorderStepBtnDisabled]}
-                          onPress={() => moveCustomer(idx, idx + 1)}
-                          disabled={isLast}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="arrow-down" size={16} color={isLast ? '#CBD5E1' : '#0060AF'} />
-                        </TouchableOpacity>
-
-                        <View style={styles.reorderDragHandle} title="Drag to reorder">
-                          <Ionicons name="reorder-three" size={20} color="#64748B" />
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })
+                reorderList.map((cust, idx) => (
+                  <ReorderCustomerItem
+                    key={cust.id}
+                    cust={cust}
+                    idx={idx}
+                    total={reorderList.length}
+                    isDragging={draggedCustIndex === idx}
+                    isOver={dragOverCustIndex === idx}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onDragEnd={handleDragEnd}
+                    onMoveCustomer={moveCustomer}
+                    onMoveToTop={moveToTop}
+                    onMoveToBottom={moveToBottom}
+                    onTouchHandleStart={handleTouchHandleStart}
+                  />
+                ))
               )}
             </ScrollView>
 
@@ -1727,6 +1761,173 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
         message="Saving changes to database..."
       />
     </SafeAreaView>
+  );
+}
+
+// Component for each draggable & reorderable customer row
+function ReorderCustomerItem({
+  cust,
+  idx,
+  total,
+  isDragging,
+  isOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onMoveCustomer,
+  onTouchHandleStart,
+}) {
+  const itemRef = useRef(null);
+  const isFirst = idx === 0;
+  const isLast = idx === total - 1;
+
+  // Mutable ref so PanResponder always has access to the latest index and callbacks on mobile
+  const propsRef = useRef({ idx, total, onDragStart, onDragOver, onMoveCustomer, onDragEnd });
+  propsRef.current = { idx, total, onDragStart, onDragOver, onMoveCustomer, onDragEnd };
+
+  // Native mobile PanResponder: works on Android and iOS (and web touch)
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 3,
+        onMoveShouldSetPanResponderCapture: (_, gestureState) => Math.abs(gestureState.dy) > 3,
+        onPanResponderGrant: () => {
+          propsRef.current.onDragStart(propsRef.current.idx);
+        },
+        onPanResponderMove: (_, gestureState) => {
+          const { onDragOver: over, idx: currentIdx, total: totalCount } = propsRef.current;
+          const approxItemHeight = 62;
+          const offsetSlots = Math.round(gestureState.dy / approxItemHeight);
+          const targetIdx = Math.max(0, Math.min(totalCount - 1, currentIdx + offsetSlots));
+          over(targetIdx);
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const { onMoveCustomer: move, onDragEnd: end, idx: currentIdx, total: totalCount } = propsRef.current;
+          const approxItemHeight = 62;
+          const offsetSlots = Math.round(gestureState.dy / approxItemHeight);
+          const targetIdx = Math.max(0, Math.min(totalCount - 1, currentIdx + offsetSlots));
+          if (targetIdx !== currentIdx) {
+            move(currentIdx, targetIdx);
+          }
+          end();
+        },
+        onPanResponderTerminate: () => {
+          propsRef.current.onDragEnd();
+        },
+      }),
+    []
+  );
+
+  // HTML5 drag and drop for desktop Web browsers
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !itemRef.current) return;
+    const el = itemRef.current;
+
+    el.setAttribute('draggable', 'true');
+    el.setAttribute('data-reorder-index', String(idx));
+
+    const handleDomDragStart = (e) => {
+      if (e.target && e.target.closest && e.target.closest('button, [role="button"]')) {
+        e.preventDefault();
+        return;
+      }
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(idx));
+      }
+      onDragStart(idx);
+    };
+
+    const handleDomDragOver = (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      onDragOver(idx);
+    };
+
+    const handleDomDrop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      let sourceIdx = parseInt(e.dataTransfer?.getData('text/plain'), 10);
+      onDrop(sourceIdx, idx);
+    };
+
+    const handleDomDragEnd = () => {
+      onDragEnd();
+    };
+
+    el.addEventListener('dragstart', handleDomDragStart);
+    el.addEventListener('dragover', handleDomDragOver);
+    el.addEventListener('drop', handleDomDrop);
+    el.addEventListener('dragend', handleDomDragEnd);
+
+    return () => {
+      el.removeEventListener('dragstart', handleDomDragStart);
+      el.removeEventListener('dragover', handleDomDragOver);
+      el.removeEventListener('drop', handleDomDrop);
+      el.removeEventListener('dragend', handleDomDragEnd);
+    };
+  }, [idx, onDragStart, onDragOver, onDrop, onDragEnd]);
+
+  return (
+    <View
+      ref={itemRef}
+      style={[
+        styles.reorderItemCard,
+        isDragging && styles.reorderItemDragging,
+        isOver && styles.reorderItemDragOver,
+      ]}
+    >
+      {/* Sequence Badge */}
+      <View style={styles.reorderSeqBubble}>
+        <Text style={styles.reorderSeqBubbleText}>{idx + 1}</Text>
+      </View>
+
+      {/* Customer Info */}
+      <View style={styles.reorderItemInfo}>
+        <Text style={styles.reorderItemName}>{cust.name}</Text>
+        <Text style={styles.reorderItemSub}>
+          {cust.phone || 'No phone'} • ☀️ {cust.defaultMorningQty ?? 1}L | 🌙 {cust.defaultEveningQty ?? 0}L
+        </Text>
+      </View>
+
+      {/* Move Actions: Up, Down, Drag Handle */}
+      <View style={styles.reorderBtnGroup}>
+        <TouchableOpacity
+          style={[styles.reorderStepBtn, isFirst && styles.reorderStepBtnDisabled]}
+          onPress={() => onMoveCustomer(idx, idx - 1)}
+          disabled={isFirst}
+          activeOpacity={0.7}
+          title="Move up"
+        >
+          <Ionicons name="arrow-up" size={14} color={isFirst ? '#CBD5E1' : '#0060AF'} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.reorderStepBtn, isLast && styles.reorderStepBtnDisabled]}
+          onPress={() => onMoveCustomer(idx, idx + 1)}
+          disabled={isLast}
+          activeOpacity={0.7}
+          title="Move down"
+        >
+          <Ionicons name="arrow-down" size={14} color={isLast ? '#CBD5E1' : '#0060AF'} />
+        </TouchableOpacity>
+
+        {/* Drag Handle: PanResponder enabled for Mobile + HTML5 touch */}
+        <View
+          style={styles.reorderDragHandle}
+          {...panResponder.panHandlers}
+          onTouchStart={(e) => onTouchHandleStart(idx, e)}
+          title="Drag up or down to reorder"
+        >
+          <Ionicons name="reorder-three" size={22} color="#0060AF" />
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -2628,7 +2829,43 @@ const styles = StyleSheet.create({
     color: '#0060AF',
   },
   reorderScrollContainer: {
-    maxHeight: 380,
+    flex: 1,
+    minHeight: 240,
+  },
+  reorderModalOverlay: {
+    padding: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  reorderModalCard: {
+    width: '96%',
+    maxWidth: 960,
+    height: '94%',
+    maxHeight: '96%',
+    borderRadius: 16,
+    padding: 16,
+    display: 'flex',
+    flexDirection: 'column',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  reorderModalCardFullscreen: {
+    width: '100%',
+    maxWidth: '100%',
+    height: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
+    padding: 16,
+  },
+  reorderHeaderIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   reorderItemCard: {
     flexDirection: 'row',
@@ -2645,16 +2882,18 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 1,
     cursor: 'grab',
+    userSelect: 'none',
   },
   reorderItemDragging: {
-    opacity: 0.5,
+    opacity: 0.4,
     borderColor: '#0060AF',
     backgroundColor: '#F0F9FF',
+    cursor: 'grabbing',
   },
   reorderItemDragOver: {
     borderColor: '#0284C7',
     borderWidth: 2,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#E0F2FE',
     transform: [{ scale: 1.02 }],
   },
   reorderSeqBubble: {
@@ -2689,11 +2928,11 @@ const styles = StyleSheet.create({
   reorderBtnGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   reorderStepBtn: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: 6,
     backgroundColor: '#F1F5F9',
     borderWidth: 1,
@@ -2704,13 +2943,32 @@ const styles = StyleSheet.create({
   reorderStepBtnDisabled: {
     backgroundColor: '#F8FAFC',
     borderColor: '#E2E8F0',
-    opacity: 0.5,
+    opacity: 0.4,
   },
   reorderDragHandle: {
     paddingHorizontal: 4,
     paddingVertical: 4,
     justifyContent: 'center',
     alignItems: 'center',
+    cursor: 'grab',
+    touchAction: 'none',
+  },
+  reorderTipBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  reorderTipText: {
+    fontSize: 11,
+    color: '#0369A1',
+    fontWeight: '600',
+    flex: 1,
   },
   reorderFooter: {
     marginTop: 10,
