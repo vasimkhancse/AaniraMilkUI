@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "AaniraMilk",
-    "slug": "AaniraMilk",
+    "slug": "aanira-milk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,13 +15,20 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "com.vasimkhan.aaniramilk"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5056caf3-d901-4f06-bf8c-4369666e0e37"
+      }
+    },
+    "owner": "vasimkhan"
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,7 @@ export default function AddEntryScreen({
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditingSaved, setIsEditingSaved] = useState(false);
+  const [savedSearchQuery, setSavedSearchQuery] = useState('');
 
   const baseRate = masters?.milkRatePerLiter || 60;
   const quantityPresets = masters?.quantityPresets || [
@@ -60,10 +61,21 @@ export default function AddEntryScreen({
       ? 'All Areas'
       : selectedAreaObj?.name?.split(' - ')[0] || selectedAreaFilter.toUpperCase();
 
-  // Sort customers by sequence number first, then name
-  const sortedCustomers = [...allCustomers].sort(
-    (a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || '')
-  );
+  // Customer lookup map for instant access to sequence, phone, etc.
+  const customerMap = useMemo(() => {
+    const map = new Map();
+    allCustomers.forEach((c) => {
+      map.set(c.id, c);
+    });
+    return map;
+  }, [allCustomers]);
+
+  // Sort customers strictly by sequence number first, then name
+  const sortedCustomers = useMemo(() => {
+    return [...allCustomers].sort(
+      (a, b) => (a.sequence || 0) - (b.sequence || 0) || (a.name || '').localeCompare(b.name || '')
+    );
+  }, [allCustomers]);
 
   // Filter customers by selected area, search query, and quantity > 0 for the selected shift
   const filteredCustomers = sortedCustomers.filter((c) => {
@@ -109,6 +121,32 @@ export default function AddEntryScreen({
   });
 
   const hasExistingSavedEntry = existingDeliveriesForShiftAndArea.length > 0;
+
+  // Saved deliveries strictly ordered by sequence number first, then customer name
+  const displayedSavedDeliveries = useMemo(() => {
+    let list = [...existingDeliveriesForShiftAndArea];
+
+    if (savedSearchQuery.trim()) {
+      const q = savedSearchQuery.trim().toLowerCase();
+      list = list.filter((del) => {
+        const cust = customerMap.get(del.customerId);
+        const nameMatch = (del.customerName || cust?.name || '').toLowerCase().includes(q);
+        const phoneMatch = cust?.phone ? cust.phone.includes(q) : false;
+        return nameMatch || phoneMatch;
+      });
+    }
+
+    return list.sort((a, b) => {
+      const custA = customerMap.get(a.customerId);
+      const custB = customerMap.get(b.customerId);
+      const seqA = custA?.sequence !== undefined ? Number(custA.sequence) : (Number(a.sequence) || 0);
+      const seqB = custB?.sequence !== undefined ? Number(custB.sequence) : (Number(b.sequence) || 0);
+      const nameA = (a.customerName || custA?.name || '').trim();
+      const nameB = (b.customerName || custB?.name || '').trim();
+
+      return seqA - seqB || nameA.localeCompare(nameB);
+    });
+  }, [existingDeliveriesForShiftAndArea, savedSearchQuery, customerMap]);
 
   // Load existing entries or prefill based on customer behavior
   useEffect(() => {
@@ -392,32 +430,69 @@ export default function AddEntryScreen({
               <Text style={styles.savedListCount}>{existingDeliveriesForShiftAndArea.length} records</Text>
             </View>
 
+            {/* Optional Search Bar for Saved Deliveries */}
+            {existingDeliveriesForShiftAndArea.length > 5 && (
+              <View style={styles.savedSearchBar}>
+                <Ionicons name="search" size={16} color="#94A3B8" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={styles.savedSearchInput}
+                  placeholder="Search saved customer..."
+                  placeholderTextColor="#94A3B8"
+                  value={savedSearchQuery}
+                  onChangeText={setSavedSearchQuery}
+                />
+                {savedSearchQuery ? (
+                  <TouchableOpacity onPress={() => setSavedSearchQuery('')}>
+                    <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            )}
+
             <View style={styles.savedTable}>
               <View style={styles.savedTableHeader}>
-                <Text style={[styles.savedColHead, { width: 32, textAlign: 'center' }]}>#</Text>
+                <Text style={[styles.savedColHead, { width: 34, textAlign: 'center' }]}>#</Text>
                 <Text style={[styles.savedColHead, { flex: 1.2 }]}>Customer</Text>
                 <Text style={[styles.savedColHead, { width: 70, textAlign: 'center' }]}>Qty (L)</Text>
                 <Text style={[styles.savedColHead, { width: 75, textAlign: 'right' }]}>Amount</Text>
               </View>
 
-              {existingDeliveriesForShiftAndArea.map((del, idx) => (
-                <View key={del.id || idx} style={[styles.savedTableRow, idx % 2 === 1 && styles.savedTableRowAlt]}>
-                  <Text style={[styles.savedCellText, { width: 32, textAlign: 'center', color: '#64748B', fontWeight: '700' }]}>
-                    {idx + 1}
-                  </Text>
-                  <Text style={[styles.savedCellText, { flex: 1.2, fontWeight: '700' }]}>
-                    {del.customerName || 'Customer'}
-                  </Text>
-                  <View style={{ width: 70, alignItems: 'center' }}>
-                    <View style={styles.savedQtyChip}>
-                      <Text style={styles.savedQtyChipText}>{del.qty} L</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.savedCellText, { width: 75, textAlign: 'right', fontWeight: '800', color: '#0060AF' }]}>
-                    ₹{del.amount}
-                  </Text>
+              {displayedSavedDeliveries.length === 0 ? (
+                <View style={styles.emptySavedTable}>
+                  <Text style={styles.emptySavedText}>No matching saved entries found</Text>
                 </View>
-              ))}
+              ) : (
+                displayedSavedDeliveries.map((del, idx) => {
+                  const cust = customerMap.get(del.customerId);
+                  const custSeq = cust?.sequence !== undefined ? Number(cust.sequence) : (Number(del.sequence) || 0);
+
+                  return (
+                    <View key={del.id || idx} style={[styles.savedTableRow, idx % 2 === 1 && styles.savedTableRowAlt]}>
+                      <Text style={[styles.savedCellText, { width: 34, textAlign: 'center', color: '#64748B', fontWeight: '700' }]}>
+                        {idx + 1}
+                      </Text>
+                      <View style={{ flex: 1.2, justifyContent: 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
+                          <Text style={[styles.savedCellText, { fontWeight: '700' }]}>
+                            {del.customerName || cust?.name || 'Customer'}
+                          </Text>
+                        </View>
+                        {cust?.phone ? (
+                          <Text style={styles.savedPhoneSubText}>{cust.phone}</Text>
+                        ) : null}
+                      </View>
+                      <View style={{ width: 70, alignItems: 'center' }}>
+                        <View style={styles.savedQtyChip}>
+                          <Text style={styles.savedQtyChipText}>{del.qty} L</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.savedCellText, { width: 75, textAlign: 'right', fontWeight: '800', color: '#0060AF' }]}>
+                        ₹{del.amount}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
             </View>
 
             {/* Prominent Edit Deliveries Button */}
@@ -929,6 +1004,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   savedListTitle: {
     fontSize: 13,
@@ -939,6 +1016,40 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#64748B',
+  },
+  
+  savedPhoneSubText: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  savedSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 38,
+    marginBottom: 10,
+  },
+  savedSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#0F172A',
+    paddingVertical: 0,
+  },
+  emptySavedTable: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptySavedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
   },
   savedTable: {
     backgroundColor: '#FFFFFF',
