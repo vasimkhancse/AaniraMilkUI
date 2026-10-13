@@ -20,6 +20,7 @@ import {
   formatDisplayDate,
   getAvailableMonths,
 } from '../utils/dateUtils';
+import { useBackModal } from '../services/modalBackHandler';
 
 export default function CustomerBillScreen({
   customerId,
@@ -37,6 +38,10 @@ export default function CustomerBillScreen({
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+
+  // Hook back button to close modals safely
+  useBackModal(showCustomerPicker, () => setShowCustomerPicker(false));
+  useBackModal(showShareModal, () => setShowShareModal(false));
 
   const [selectedMonth, setSelectedMonth] = useState(month || getCurrentYearMonth());
   const months = getAvailableMonths(deliveries, selectedMonth);
@@ -300,7 +305,12 @@ ${summaryLines}${moreText}
         )}
 
         {/* Customer Picker Modal */}
-        <Modal transparent animationType="fade" visible={showCustomerPicker}>
+        <Modal
+          transparent
+          animationType="fade"
+          visible={showCustomerPicker}
+          onRequestClose={() => setShowCustomerPicker(false)}
+        >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
@@ -346,7 +356,12 @@ ${summaryLines}${moreText}
         </Modal>
 
         {/* Bill Preview Modal */}
-        <Modal transparent animationType="slide" visible={showShareModal}>
+        <Modal
+          transparent
+          animationType="slide"
+          visible={showShareModal}
+          onRequestClose={() => setShowShareModal(false)}
+        >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>

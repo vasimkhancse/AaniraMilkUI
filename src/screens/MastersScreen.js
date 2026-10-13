@@ -17,10 +17,12 @@ import AppHeader from '../components/AppHeader';
 import { storageService } from '../services/storageService';
 import { apiService } from '../services/apiService';
 import CircleLoader, { LoadingOverlay } from '../components/CircleLoader';
+import { useBackModal } from '../services/modalBackHandler';
 
 export default function MastersScreen({ masters, onUpdateMasters, onResetDemoData, onBack, onRefresh }) {
   const [activeTab, setActiveTab] = useState('customers'); // customers | rates | areas | users
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
+  const [isCustomerFullscreen, setIsCustomerFullscreen] = useState(true);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [syncStatus, setSyncStatus] = useState('');
 
@@ -402,6 +404,12 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   const [editUserArea, setEditUserArea] = useState('area-1');
   const [isEditUserAreaDropdownOpen, setIsEditUserAreaDropdownOpen] = useState(false);
   const [isDeletingUserId, setIsDeletingUserId] = useState(null);
+
+  // Auto-intercept Back button (mobile hardware back and browser back) when any modal is open
+  useBackModal(customerModalVisible, () => setCustomerModalVisible(false));
+  useBackModal(reorderModalVisible, () => setReorderModalVisible(false));
+  useBackModal(areaModalVisible, () => setAreaModalVisible(false));
+  useBackModal(userModalVisible, () => setUserModalVisible(false));
 
   const handleAddArea = async () => {
     if (!newAreaName.trim()) return;
@@ -1341,19 +1349,59 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       </ScrollView>
 
       {/* Customer Edit / Add Modal */}
-      <Modal transparent animationType="slide" visible={customerModalVisible}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+      <Modal
+        transparent={!isCustomerFullscreen}
+        animationType="slide"
+        visible={customerModalVisible}
+        onRequestClose={() => setCustomerModalVisible(false)}
+      >
+        <View style={[styles.modalOverlay, isCustomerFullscreen && styles.customerModalOverlayFullscreen]}>
+          <View style={[styles.modalCard, styles.customerModalCard, isCustomerFullscreen && styles.customerModalCardFullscreen]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
-              </Text>
-              <TouchableOpacity onPress={() => setCustomerModalVisible(false)} disabled={isSavingCustomer}>
-                <Ionicons name="close" size={24} color="#64748B" />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={styles.custHeaderIconBadge}>
+                  <Ionicons name="person" size={18} color="#0060AF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle}>
+                    {editingCustomer ? 'Edit Customer' : 'Add New Customer'}
+                  </Text>
+                  <Text style={styles.custModalSubtitle}>
+                    {editingCustomer
+                      ? `Editing sequence #${custSequence || ''} • ${custName || editingCustomer.name}`
+                      : `Delivery sequence #${custSequence || 'Auto'} in selected area`}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  onPress={() => setIsCustomerFullscreen(!isCustomerFullscreen)}
+                  style={styles.reorderHeaderIconBtn}
+                  title={isCustomerFullscreen ? 'Restore window view' : 'Expand to full screen'}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={isCustomerFullscreen ? 'contract-outline' : 'expand-outline'}
+                    size={18}
+                    color="#64748B"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setCustomerModalVisible(false)}
+                  disabled={isSavingCustomer}
+                  style={styles.reorderHeaderIconBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close" size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <ScrollView bounces={false}>
+            <ScrollView
+              bounces={false}
+              style={{ flex: 1 }}
+              contentContainerStyle={isCustomerFullscreen ? styles.customerScrollFullscreen : null}
+            >
               {custModalError ? (
                 <View style={styles.modalErrorBox}>
                   <Ionicons name="alert-circle" size={16} color="#DC2626" />
@@ -1361,126 +1409,158 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                 </View>
               ) : null}
 
-              <Text style={styles.inputLabelModal}>Customer Name *</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. Kumar, Priya, Ravi"
-                placeholderTextColor="#94A3B8"
-                value={custName}
-                onChangeText={(text) => {
-                  setCustName(text);
-                  if (custModalError) setCustModalError('');
-                }}
-              />
+              {/* Section 1: Customer Profile & Phone */}
+              <View style={null}>
 
-              <View style={styles.inputLabelRowSpace}>
-                <Text style={styles.inputLabelModal}>Phone Number (WhatsApp) *</Text>
-                <Text
-                  style={[
-                    styles.inputCounterText,
-                    custPhone.length === 10 && styles.inputCounterValid,
-                  ]}
-                >
-                  {custPhone.length}/10 digits
-                </Text>
-              </View>
-              <View style={styles.phoneInputContainer}>
-                <View style={styles.countryCodeBadge}>
-                  <Text style={styles.countryCodeText}>+91</Text>
-                </View>
+                <Text style={styles.inputLabelModal}>Customer Name *</Text>
                 <TextInput
-                  style={styles.phoneInputField}
-                  placeholder="10-digit mobile number"
+                  style={styles.modalInput}
+                  placeholder="e.g. Kumar, Priya, Ravi"
                   placeholderTextColor="#94A3B8"
-                  keyboardType="number-pad"
-                  maxLength={10}
-                  value={custPhone}
+                  value={custName}
                   onChangeText={(text) => {
-                    const cleaned = text.replace(/[^0-9]/g, '').slice(0, 10);
-                    setCustPhone(cleaned);
+                    setCustName(text);
                     if (custModalError) setCustModalError('');
                   }}
                 />
-              </View>
 
-              <Text style={styles.inputLabelModal}>Assigned Area</Text>
-              <View style={styles.areaSelectRow}>
-                {(masters?.areas || []).map((area) => {
-                  const isSelected = custAreaId === area.id;
-                  return (
-                    <TouchableOpacity
-                      key={area.id}
-                      style={[styles.areaSelectBtn, isSelected && styles.areaSelectBtnActive]}
-                      onPress={() => handleSelectCustArea(area.id)}
-                    >
-                      <Text
-                        style={[
-                          styles.areaSelectText,
-                          isSelected && styles.areaSelectTextActive,
-                        ]}
-                      >
-                        {area.shortName || area.name.split(' - ')[0]}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <Text style={styles.inputLabelModal}>Default Morning Quantity (Litres)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="1.0"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={custMorningQty}
-                onChangeText={setCustMorningQty}
-              />
-
-              <Text style={styles.inputLabelModal}>Default Evening Quantity (Litres)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="0.0"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={custEveningQty}
-                onChangeText={setCustEveningQty}
-              />
-
-              <Text style={styles.inputLabelModal}>Rate per Litre (₹)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="60"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={custPricePerLiter}
-                onChangeText={setCustPricePerLiter}
-              />
-
-              
-
-              <TouchableOpacity
-                style={[styles.saveCustomerBtn, isSavingCustomer && styles.btnDisabled]}
-                onPress={handleSaveCustomer}
-                disabled={isSavingCustomer}
-              >
-                {isSavingCustomer ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                    <CircleLoader size="small" color="#FFFFFF" />
-                    <Text style={styles.saveCustomerBtnText}>Saving Customer...</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.saveCustomerBtnText}>
-                    {editingCustomer ? 'Update Customer' : 'Save New Customer'}
+                <View style={styles.inputLabelRowSpace}>
+                  <Text style={styles.inputLabelModal}>Phone Number (WhatsApp) *</Text>
+                  <Text
+                    style={[
+                      styles.inputCounterText,
+                      custPhone.length === 10 && styles.inputCounterValid,
+                    ]}
+                  >
+                    {custPhone.length}/10 digits
                   </Text>
-                )}
-              </TouchableOpacity>
+                </View>
+                <View style={styles.phoneInputContainer}>
+                  <View style={styles.countryCodeBadge}>
+                    <Text style={styles.countryCodeText}>+91</Text>
+                  </View>
+                  <TextInput
+                    style={styles.phoneInputField}
+                    placeholder="10-digit mobile number"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="number-pad"
+                    maxLength={10}
+                    value={custPhone}
+                    onChangeText={(text) => {
+                      const cleaned = text.replace(/[^0-9]/g, '').slice(0, 10);
+                      setCustPhone(cleaned);
+                      if (custModalError) setCustModalError('');
+                    }}
+                  />
+                </View>
+              </View>
+
+              {/* Section 2: Area & Route */}
+              <View style={null}>
+
+                <Text style={styles.inputLabelModal}>Assigned Area</Text>
+                <View style={styles.areaSelectRow}>
+                  {(masters?.areas || []).map((area) => {
+                    const isSelected = custAreaId === area.id;
+                    return (
+                      <TouchableOpacity
+                        key={area.id}
+                        style={[styles.areaSelectBtn, isSelected && styles.areaSelectBtnActive]}
+                        onPress={() => handleSelectCustArea(area.id)}
+                      >
+                        <Text
+                          style={[
+                            styles.areaSelectText,
+                            isSelected && styles.areaSelectTextActive,
+                          ]}
+                        >
+                          {area.shortName || area.name.split(' - ')[0]}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Section 3: Milk Quotas & Rates */}
+              <View style={ null}>
+             
+
+                <View style={isCustomerFullscreen ? styles.custFormRow2Col : null}>
+                  <View style={isCustomerFullscreen ? styles.custFormCol : null}>
+                    <Text style={styles.inputLabelModal}>Default Morning Qty (L)</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="1.0"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric"
+                      value={custMorningQty}
+                      onChangeText={setCustMorningQty}
+                    />
+                  </View>
+
+                  <View style={isCustomerFullscreen ? styles.custFormCol : null}>
+                    <Text style={styles.inputLabelModal}>Default Evening Qty (L)</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="0.0"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric"
+                      value={custEveningQty}
+                      onChangeText={setCustEveningQty}
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.inputLabelModal}>Rate per Litre (₹)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="60"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                  value={custPricePerLiter}
+                  onChangeText={setCustPricePerLiter}
+                />
+              </View>
+
+              <View style={styles.custActionsRow}>
+                <TouchableOpacity
+                  style={styles.custCancelBtn}
+                  onPress={() => setCustomerModalVisible(false)}
+                  disabled={isSavingCustomer}
+                >
+                  <Text style={styles.custCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.saveCustomerBtn, { flex: 2, marginTop: 0 }, isSavingCustomer && styles.btnDisabled]}
+                  onPress={handleSaveCustomer}
+                  disabled={isSavingCustomer}
+                >
+                  {isSavingCustomer ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <CircleLoader size="small" color="#FFFFFF" />
+                      <Text style={styles.saveCustomerBtnText}>Saving Customer...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.saveCustomerBtnText}>
+                      {editingCustomer ? 'Update Customer' : 'Save New Customer'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </ScrollView>
           </View>
         </View>
       </Modal>
 
       {/* Customer Drag & Drop / Reorder Sequence Modal */}
-      <Modal transparent animationType="slide" visible={reorderModalVisible}>
+      <Modal
+        transparent
+        animationType="slide"
+        visible={reorderModalVisible}
+        onRequestClose={() => setReorderModalVisible(false)}
+      >
         <View style={[styles.modalOverlay, styles.reorderModalOverlay]}>
           <View style={[styles.modalCard, styles.reorderModalCard, isReorderFullscreen && styles.reorderModalCardFullscreen]}>
             <View style={styles.modalHeader}>
@@ -1622,7 +1702,12 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       </Modal>
 
       {/* Area Edit Modal */}
-      <Modal transparent animationType="slide" visible={areaModalVisible}>
+      <Modal
+        transparent
+        animationType="slide"
+        visible={areaModalVisible}
+        onRequestClose={() => setAreaModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -1662,7 +1747,12 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
       </Modal>
 
       {/* User / Staff Edit Modal */}
-      <Modal transparent animationType="slide" visible={userModalVisible}>
+      <Modal
+        transparent
+        animationType="slide"
+        visible={userModalVisible}
+        onRequestClose={() => setUserModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -2850,6 +2940,101 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 16,
     elevation: 10,
+  },
+  customerModalOverlayFullscreen: {
+    padding: 0,
+    backgroundColor: '#FFFFFF',
+  },
+  customerModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    width: '95%',
+    maxWidth: 520,
+    maxHeight: '92%',
+  },
+  customerModalCardFullscreen: {
+    width: '100%',
+    maxWidth: '100%',
+    height: '100%',
+    maxHeight: '100%',
+    borderRadius: 0,
+    padding: 16,
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  customerScrollFullscreen: {
+    paddingBottom: 40,
+  },
+  custHeaderIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  custModalSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  custFormSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  custSectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 6,
+  },
+  custSectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0060AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  custFormRow2Col: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  custFormCol: {
+    flex: 1,
+  },
+  custActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  custCancelBtn: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  custCancelBtnText: {
+    color: '#475569',
+    fontSize: 13,
+    fontWeight: '700',
   },
   reorderModalCardFullscreen: {
     width: '100%',

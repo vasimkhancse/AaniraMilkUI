@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,9 +9,12 @@ import {
   Platform,
   useWindowDimensions,
   ActivityIndicator,
+  BackHandler,
+  ToastAndroid,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { storageService } from './src/services/storageService';
+import { hasOpenModals, closeTopModal } from './src/services/modalBackHandler';
 import AaniraLogo from './src/components/AaniraLogo';
 import LoginScreen from './src/screens/LoginScreen';
 import AddEntryScreen from './src/screens/AddEntryScreen';
@@ -34,6 +37,11 @@ export default function App() {
   const [masters, setMasters] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
   const [deviceFrameMode, setDeviceFrameMode] = useState(width > 768);
+
+  // Navigation History Stack for back button handling across Web and Mobile
+  const [navStack, setNavStack] = useState([{ tab: 'entry' }]);
+  const navStackRef = useRef([{ tab: 'entry' }]);
+  const lastBackPressRef = useRef(0);
 
   // Initialize data on mount
   useEffect(() => {
@@ -69,21 +77,163 @@ export default function App() {
     }
   };
 
-  const handleTabPress = async (tabName) => {
-    setActiveTab(tabName);
+  const applyScreenState = (screenInfo) => {
+    if (!screenInfo) return;
+    setActiveTab(screenInfo.tab || 'entry');
+    if (screenInfo.customerId) {
+      setSelectedCustomerIdForBill(screenInfo.customerId);
+    }
+    if (screenInfo.month) {
+      setSelectedBillMonth(screenInfo.month);
+    }
     setRefreshKey((prev) => prev + 1);
-    await refreshAppData();
+    refreshAppData();
+  };
+
+  const navigateTo = (screenInfo, replace = false) => {
+    const current = navStackRef.current[navStackRef.current.length - 1];
+    if (
+      current &&
+      current.tab === screenInfo.tab &&
+      current.customerId === screenInfo.customerId &&
+      current.month === screenInfo.month
+    ) {
+      return;
+    }
+
+    let newStack;
+    if (replace) {
+      newStack = [...navStackRef.current.slice(0, -1), screenInfo];
+    } else {
+      newStack = [...navStackRef.current, screenInfo];
+    }
+    navStackRef.current = newStack;
+    setNavStack(newStack);
+    applyScreenState(screenInfo);
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history) {
+      try {
+        window.history.pushState(
+          { ...screenInfo, depth: newStack.length - 1 },
+          '',
+          `#${screenInfo.tab}`
+        );
+      } catch (e) {
+        console.warn('history.pushState error:', e);
+      }
+    }
+  };
+
+  const handleGoBack = (syncWebHistory = true) => {
+    // 1. If any modal is open across the entire app, close it first!
+    if (hasOpenModals()) {
+      closeTopModal();
+      return true;
+    }
+
+    // 2. If we have previous screens in our history, go back to previous page
+    if (navStackRef.current.length > 1) {
+      const newStack = navStackRef.current.slice(0, -1);
+      navStackRef.current = newStack;
+      setNavStack(newStack);
+
+      const prevScreen = newStack[newStack.length - 1];
+      applyScreenState(prevScreen);
+
+      if (syncWebHistory && Platform.OS === 'web' && typeof window !== 'undefined' && window.history) {
+        try {
+          window.history.back();
+        } catch (e) {
+          console.warn('history.back error:', e);
+        }
+      }
+      return true;
+    }
+
+    // 3. At root screen ('entry')
+    if (Platform.OS !== 'web') {
+      const now = Date.now();
+      if (lastBackPressRef.current && now - lastBackPressRef.current < 2000) {
+        BackHandler.exitApp();
+        return true;
+      }
+      lastBackPressRef.current = now;
+      if (Platform.OS === 'android' && ToastAndroid?.show) {
+        ToastAndroid.show('Press back again to exit Aanira Milk', ToastAndroid.SHORT);
+      }
+      return true;
+    }
+
+    return false;
+  };
+
+  // Web Browser Back Button (popstate) Listener
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history) {
+      try {
+        window.history.replaceState({ tab: 'entry', depth: 0 }, '', '#entry');
+      } catch (e) {}
+
+      const handlePopState = (e) => {
+        if (hasOpenModals()) {
+          closeTopModal();
+          const current = navStackRef.current[navStackRef.current.length - 1];
+          if (current && window.history) {
+            try {
+              window.history.pushState(
+                { ...current, depth: navStackRef.current.length - 1 },
+                '',
+                `#${current.tab}`
+              );
+            } catch (err) {}
+          }
+          return;
+        }
+
+        // Pop internal navigation stack without calling window.history.back() again
+        handleGoBack(false);
+      };
+
+      window.addEventListener('popstate', handlePopState);
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  }, []);
+
+  // Android Mobile Hardware Back Button Listener
+  useEffect(() => {
+    const handleHardwareBack = () => {
+      return handleGoBack(true);
+    };
+
+    const backSub = BackHandler.addEventListener('hardwareBackPress', handleHardwareBack);
+    return () => {
+      if (backSub?.remove) {
+        backSub.remove();
+      } else {
+        BackHandler.removeEventListener('hardwareBackPress', handleHardwareBack);
+      }
+    };
+  }, []);
+
+  const handleTabPress = async (tabName) => {
+    navigateTo({ tab: tabName });
   };
 
   const handleLogin = async (user) => {
     setCurrentUser(user);
     await storageService.setCurrentUser(user);
-    handleTabPress('entry');
+    navStackRef.current = [{ tab: 'entry' }];
+    setNavStack([{ tab: 'entry' }]);
+    applyScreenState({ tab: 'entry' });
   };
 
   const handleLogout = async () => {
     setCurrentUser(null);
     await storageService.setCurrentUser(null);
+    navStackRef.current = [{ tab: 'entry' }];
+    setNavStack([{ tab: 'entry' }]);
   };
 
   const handleSaveEntriesBatch = async (batch) => {
@@ -93,11 +243,11 @@ export default function App() {
   };
 
   const handleNavigateToCustomerBill = async (customerId, month) => {
-    setSelectedCustomerIdForBill(customerId);
-    if (month) setSelectedBillMonth(month);
-    setActiveTab('bill');
-    setRefreshKey((prev) => prev + 1);
-    await refreshAppData();
+    navigateTo({
+      tab: 'bill',
+      customerId,
+      month: month || selectedBillMonth,
+    });
   };
 
   const handleResetDemoData = async () => {
@@ -155,7 +305,7 @@ export default function App() {
             currentUser={currentUser}
             deliveries={deliveries}
             onSelectCustomerBill={handleNavigateToCustomerBill}
-            onBack={() => handleTabPress('entry')}
+            onBack={() => handleGoBack(true)}
             onRefresh={refreshAppData}
           />
         );
@@ -167,7 +317,7 @@ export default function App() {
             month={selectedBillMonth}
             masters={masters}
             deliveries={deliveries}
-            onBack={() => handleTabPress('summary')}
+            onBack={() => handleGoBack(true)}
             onRefresh={refreshAppData}
           />
         );
@@ -175,7 +325,7 @@ export default function App() {
         if (currentUser?.role !== 'admin') {
           return (
             <SafeAreaView style={styles.restrictedContainer}>
-              <AppHeader title="Access Restricted" showBack onBack={() => handleTabPress('entry')} />
+              <AppHeader title="Access Restricted" showBack onBack={() => handleGoBack(true)} />
               <View style={styles.restrictedBox}>
                 <Ionicons name="shield-outline" size={48} color="#DC2626" />
                 <Text style={styles.restrictedTitle}>Admin Access Only</Text>
@@ -184,7 +334,7 @@ export default function App() {
                 </Text>
                 <TouchableOpacity
                   style={styles.restrictedBtn}
-                  onPress={() => handleTabPress('entry')}
+                  onPress={() => handleGoBack(true)}
                 >
                   <Text style={styles.restrictedBtnText}>Back to Delivery Sheets</Text>
                 </TouchableOpacity>
@@ -199,7 +349,7 @@ export default function App() {
             currentUser={currentUser}
             onUpdateMasters={setMasters}
             onResetDemoData={handleResetDemoData}
-            onBack={() => handleTabPress('entry')}
+            onBack={() => handleGoBack(true)}
             onRefresh={refreshAppData}
           />
         );

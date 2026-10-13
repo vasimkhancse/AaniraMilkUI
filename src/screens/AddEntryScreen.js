@@ -15,6 +15,7 @@ import AppHeader from '../components/AppHeader';
 import CalendarModal from '../components/CalendarModal';
 import { getTodayIso, formatDisplayDate } from '../utils/dateUtils';
 import CircleLoader, { LoadingOverlay } from '../components/CircleLoader';
+import { useBackModal } from '../services/modalBackHandler';
 
 export default function AddEntryScreen({
   masters,
@@ -38,6 +39,10 @@ export default function AddEntryScreen({
   const [entriesMap, setEntriesMap] = useState({});
   const [activeModalCustomer, setActiveModalCustomer] = useState(null);
   const [modalCustomQty, setModalCustomQty] = useState('');
+
+  // Handle back button to dismiss modals safely
+  useBackModal(isCalendarOpen, () => setIsCalendarOpen(false));
+  useBackModal(Boolean(activeModalCustomer), () => setActiveModalCustomer(null));
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditingSaved, setIsEditingSaved] = useState(false);
@@ -719,7 +724,12 @@ export default function AddEntryScreen({
 
       {/* Quantity Edit Modal */}
       {activeModalCustomer && (
-        <Modal transparent animationType="fade" visible={Boolean(activeModalCustomer)}>
+        <Modal
+          transparent
+          animationType="fade"
+          visible={Boolean(activeModalCustomer)}
+          onRequestClose={() => setActiveModalCustomer(null)}
+        >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
