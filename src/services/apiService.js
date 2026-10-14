@@ -60,6 +60,13 @@ export const apiService = {
     });
   },
 
+  async updateAreaRate(areaId, pricePerLiter) {
+    return request('/customers/update-area-rate', {
+      method: 'POST',
+      body: JSON.stringify({ areaId, pricePerLiter }),
+    });
+  },
+
   async updateSetting(key, value) {
     return request('/masters/settings', {
       method: 'POST',

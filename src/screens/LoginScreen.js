@@ -19,7 +19,7 @@ export default function LoginScreen({ masters, onLogin }) {
   const currentHour = new Date().getHours();
   const defaultShift = currentHour >= 14 ? 'Evening' : 'Morning';
   
-  const [supplyBoyId, setSupplyBoyId] = useState('');
+  const [supplyBoyId, setSupplyBoyId] = useState('admin');
   const [selectedArea, setSelectedArea] = useState('area-1');
   const [selectedShift, setSelectedShift] = useState(defaultShift);
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);

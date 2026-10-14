@@ -35,6 +35,19 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Delete Confirmation Modal State
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteItemTarget, setDeleteItemTarget] = useState(null); // { type: 'customer' | 'area' | 'user', id, name }
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+
+  // Area-Wise Rate Update Modal State
+  const [areaRateModalVisible, setAreaRateModalVisible] = useState(false);
+  const [selectedRateAreaId, setSelectedRateAreaId] = useState('');
+  const [isAreaRateDropdownOpen, setIsAreaRateDropdownOpen] = useState(false);
+  const [newAreaRate, setNewAreaRate] = useState('');
+  const [isSavingAreaRate, setIsSavingAreaRate] = useState(false);
+  const [areaRateError, setAreaRateError] = useState('');
+
   const handleSubTabPress = async (tab) => {
     setActiveTab(tab);
     setIsTabLoading(true);
@@ -193,18 +206,74 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
     }
   };
 
-  const handleDeleteCustomer = async (id) => {
-    setIsDeletingCustomerId(id);
+  const confirmDeleteCustomer = (customer) => {
+    setDeleteItemTarget({
+      type: 'customer',
+      id: customer.id,
+      name: customer.name,
+      details: (masters?.areas || []).find((a) => a.id === customer.areaId)?.name || 'Unassigned Area',
+    });
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteArea = (area) => {
+    const custCount = (masters?.customers || []).filter((c) => c.areaId === area.id).length;
+    setDeleteItemTarget({
+      type: 'area',
+      id: area.id,
+      name: area.name,
+      details: `${custCount} assigned customer(s)`,
+    });
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteUser = (user) => {
+    setDeleteItemTarget({
+      type: 'user',
+      id: user.id,
+      name: user.name,
+      details: user.role === 'admin' ? 'Administrator' : 'Supply Staff',
+    });
+    setDeleteModalVisible(true);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!deleteItemTarget) return;
+    setIsDeletingItem(true);
     try {
-      const updated = await storageService.deleteCustomer(id);
-      onUpdateMasters({
-        ...masters,
-        customers: updated,
-      });
+      if (deleteItemTarget.type === 'customer') {
+        const updated = await storageService.deleteCustomer(deleteItemTarget.id);
+        onUpdateMasters({
+          ...masters,
+          customers: updated,
+        });
+        setSyncStatus(`Customer "${deleteItemTarget.name}" deleted successfully`);
+      } else if (deleteItemTarget.type === 'area') {
+        const updatedAreas = await storageService.deleteArea(deleteItemTarget.id);
+        const updated = { ...masters, areas: updatedAreas };
+        onUpdateMasters(updated);
+        setSyncStatus(`Delivery Area "${deleteItemTarget.name}" deleted successfully`);
+      } else if (deleteItemTarget.type === 'user') {
+        const updatedUsers = await storageService.deleteUser(deleteItemTarget.id);
+        const updated = { ...masters, users: updatedUsers };
+        onUpdateMasters(updated);
+        setSyncStatus(`Staff member "${deleteItemTarget.name}" deleted successfully`);
+      }
+      setTimeout(() => setSyncStatus(''), 2500);
+      setDeleteModalVisible(false);
+      setDeleteItemTarget(null);
     } catch (e) {
-      console.warn('Error deleting customer:', e);
+      console.warn('Error deleting item:', e);
+      Alert.alert('Delete Failed', e.message || 'Could not delete item. Please try again.');
     } finally {
-      setIsDeletingCustomerId(null);
+      setIsDeletingItem(false);
+    }
+  };
+
+  const handleDeleteCustomer = (id) => {
+    const cust = (masters?.customers || []).find((c) => c.id === id);
+    if (cust) {
+      confirmDeleteCustomer(cust);
     }
   };
 
@@ -364,6 +433,53 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
     }
   };
 
+  const openAreaRateModal = (preselectedAreaId = null) => {
+    const areas = masters?.areas || [];
+    const targetAreaId = preselectedAreaId || (areas.length > 0 ? areas[0].id : '');
+    setSelectedRateAreaId(targetAreaId);
+
+    const areaCusts = (masters?.customers || []).filter((c) => c.areaId === targetAreaId);
+    const existingRate = areaCusts.length > 0 && areaCusts[0].pricePerLiter
+      ? String(areaCusts[0].pricePerLiter)
+      : String(masters?.milkRatePerLiter || 60);
+
+    setNewAreaRate(existingRate);
+    setIsAreaRateDropdownOpen(false);
+    setAreaRateError('');
+    setAreaRateModalVisible(true);
+  };
+
+  const handleSaveAreaRate = async () => {
+    if (!selectedRateAreaId) {
+      setAreaRateError('Please select a delivery area');
+      return;
+    }
+    const num = parseFloat(newAreaRate);
+    if (isNaN(num) || num <= 0) {
+      setAreaRateError('Please enter a valid rate greater than 0');
+      return;
+    }
+
+    setIsSavingAreaRate(true);
+    setAreaRateError('');
+    try {
+      const updatedMasters = await storageService.updateAreaRate(selectedRateAreaId, num);
+      onUpdateMasters(updatedMasters);
+      const areaObj = (masters?.areas || []).find((a) => a.id === selectedRateAreaId);
+      const areaName = areaObj?.name || 'selected area';
+      const count = (masters?.customers || []).filter((c) => c.areaId === selectedRateAreaId).length;
+      setSyncStatus(`Rate updated to ₹${num}/L for ${count} customer(s) in ${areaName}`);
+      setTimeout(() => setSyncStatus(''), 3000);
+      setAreaRateModalVisible(false);
+      setIsAreaRateDropdownOpen(false);
+    } catch (e) {
+      console.warn('Error saving area rate:', e);
+      setAreaRateError(e.message || 'Failed to update area rate');
+    } finally {
+      setIsSavingAreaRate(false);
+    }
+  };
+
   const handleSaveBaseRate = async () => {
     const num = parseFloat(baseMilkRate);
     if (!isNaN(num) && num > 0) {
@@ -410,6 +526,19 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
   useBackModal(reorderModalVisible, () => setReorderModalVisible(false));
   useBackModal(areaModalVisible, () => setAreaModalVisible(false));
   useBackModal(userModalVisible, () => setUserModalVisible(false));
+  useBackModal(deleteModalVisible, () => {
+    if (!isDeletingItem) {
+      setDeleteModalVisible(false);
+      setDeleteItemTarget(null);
+    }
+  });
+  useBackModal(areaRateModalVisible, () => {
+    if (!isSavingAreaRate) {
+      setAreaRateModalVisible(false);
+      setIsAreaRateDropdownOpen(false);
+      setAreaRateError('');
+    }
+  });
 
   const handleAddArea = async () => {
     if (!newAreaName.trim()) return;
@@ -740,11 +869,11 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.iconActionBtn}
-                        onPress={() => handleDeleteCustomer(c.id)}
-                        disabled={isDeleting}
+                        onPress={() => confirmDeleteCustomer(c)}
+                        disabled={isDeletingItem && deleteItemTarget?.id === c.id}
                         activeOpacity={0.7}
                       >
-                        {isDeleting ? (
+                        {isDeletingItem && deleteItemTarget?.id === c.id ? (
                           <CircleLoader size="small" color="#DC2626" />
                         ) : (
                           <Ionicons name="trash-outline" size={17} color="#DC2626" />
@@ -1026,30 +1155,66 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
               <View>
                 <Text style={styles.sectionTitle}>Milk Rate & Quantity Master</Text>
 
+                {/* Area-Wise Rate Update Section */}
                 <View style={styles.settingsCard}>
-                  <Text style={styles.cardHeaderSmall}>Standard Base Price per Litre</Text>
-                  <View style={styles.inlineEditRow}>
-                    <Text style={styles.currencyPrefix}>₹</Text>
-                    <TextInput
-                      style={styles.rateInput}
-                      keyboardType="numeric"
-                      value={baseMilkRate}
-                      onChangeText={setBaseMilkRate}
-                    />
+                  <View style={styles.areaRateHeaderWrap}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={styles.cardHeaderSmall}>Area-Wise Milk Rate</Text>
+                      <Text style={styles.cardSubHeader}>
+                        Configure and update milk rates for customers in each delivery area
+                      </Text>
+                    </View>
                     <TouchableOpacity
-                      style={[styles.saveSmallBtn, isSavingRate && styles.btnDisabled]}
-                      onPress={handleSaveBaseRate}
-                      disabled={isSavingRate}
+                      style={styles.areaRateActionBtn}
+                      onPress={() => openAreaRateModal()}
+                      activeOpacity={0.8}
                     >
-                      {isSavingRate ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <CircleLoader size="small" color="#FFFFFF" />
-                          <Text style={styles.saveSmallBtnText}>Updating...</Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.saveSmallBtnText}>Update Rate</Text>
-                      )}
+                      <Ionicons name="pricetag" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.areaRateActionBtnText}>Area Wise Rate Update</Text>
                     </TouchableOpacity>
+                  </View>
+
+                  {/* List of Delivery Areas with Customer Counts and Current Rates */}
+                  <View style={styles.areaRateList}>
+                    {(masters?.areas || []).map((area) => {
+                      const areaCusts = (masters?.customers || []).filter((c) => c.areaId === area.id);
+                      const rates = areaCusts.map((c) => c.pricePerLiter || masters?.milkRatePerLiter || 60);
+                      const uniqueRates = [...new Set(rates)];
+                      const rateDisplay = uniqueRates.length === 0
+                        ? `₹${masters?.milkRatePerLiter || 60}/L`
+                        : uniqueRates.length === 1
+                        ? `₹${uniqueRates[0]}/L`
+                        : `₹${Math.min(...uniqueRates)} - ₹${Math.max(...uniqueRates)}/L`;
+
+                      return (
+                        <View key={area.id} style={styles.areaRateCard}>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={styles.areaRatePinBubble}>
+                                <Ionicons name="location-sharp" size={14} color="#0060AF" />
+                              </View>
+                              <Text style={styles.areaRateName}>{area.name}</Text>
+                            </View>
+                            <Text style={styles.areaRateCustCount}>
+                              {areaCusts.length} customer{areaCusts.length === 1 ? '' : 's'} in this area
+                            </Text>
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                            <View style={styles.areaRateBadge}>
+                              <Text style={styles.areaRateBadgeText}>{rateDisplay}</Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.areaRateEditBtn}
+                              onPress={() => openAreaRateModal(area.id)}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="create-outline" size={14} color="#0060AF" style={{ marginRight: 4 }} />
+                              <Text style={styles.areaRateEditBtnText}>Update Rate</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
 
@@ -1142,11 +1307,11 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.actionIconBtn, styles.actionIconBtnDelete]}
-                        onPress={() => handleDeleteArea(area.id)}
-                        disabled={isDeletingAreaId === area.id}
+                        onPress={() => confirmDeleteArea(area)}
+                        disabled={isDeletingItem && deleteItemTarget?.id === area.id}
                         activeOpacity={0.7}
                       >
-                        {isDeletingAreaId === area.id ? (
+                        {isDeletingItem && deleteItemTarget?.id === area.id ? (
                           <CircleLoader size="small" color="#DC2626" />
                         ) : (
                           <Ionicons name="trash-outline" size={16} color="#DC2626" />
@@ -1298,11 +1463,11 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                           {u.role !== 'admin' && (
                             <TouchableOpacity
                               style={[styles.actionIconBtn, styles.actionIconBtnDelete]}
-                              onPress={() => handleDeleteUser(u.id)}
-                              disabled={isDeletingUserId === u.id}
+                              onPress={() => confirmDeleteUser(u)}
+                              disabled={isDeletingItem && deleteItemTarget?.id === u.id}
                               activeOpacity={0.7}
                             >
-                              {isDeletingUserId === u.id ? (
+                              {isDeletingItem && deleteItemTarget?.id === u.id ? (
                                 <CircleLoader size="small" color="#DC2626" />
                               ) : (
                                 <Ionicons name="trash-outline" size={16} color="#DC2626" />
@@ -1846,8 +2011,238 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
         </View>
       </Modal>
 
+      {/* Area-Wise Rate Update Modal */}
+      <Modal
+        transparent
+        animationType="slide"
+        visible={areaRateModalVisible}
+        onRequestClose={() => {
+          if (!isSavingAreaRate) {
+            setAreaRateModalVisible(false);
+            setIsAreaRateDropdownOpen(false);
+            setAreaRateError('');
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={styles.headerIconCircle}>
+                  <Ionicons name="pricetag" size={18} color="#0060AF" />
+                </View>
+                <Text style={styles.modalTitle}>Area-Wise Rate Update</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setAreaRateModalVisible(false);
+                  setIsAreaRateDropdownOpen(false);
+                  setAreaRateError('');
+                }}
+                disabled={isSavingAreaRate}
+              >
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Area Dropdown */}
+            <Text style={styles.inputLabelModal}>Select Area *</Text>
+            <TouchableOpacity
+              style={styles.dropdownSelector}
+              onPress={() => setIsAreaRateDropdownOpen(!isAreaRateDropdownOpen)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.dropdownSelectedRow}>
+                <Ionicons name="location" size={16} color="#0060AF" style={{ marginRight: 8 }} />
+                <Text style={styles.dropdownSelectedText}>
+                  {(masters?.areas || []).find((a) => a.id === selectedRateAreaId)?.name || 'Select Area'}
+                </Text>
+              </View>
+              <Ionicons
+                name={isAreaRateDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color="#0060AF"
+              />
+            </TouchableOpacity>
+
+            {isAreaRateDropdownOpen && (
+              <ScrollView style={[styles.dropdownMenu, { maxHeight: 180 }]} nestedScrollEnabled>
+                {(masters?.areas || []).map((a) => {
+                  const isSelected = selectedRateAreaId === a.id;
+                  const custCount = (masters?.customers || []).filter((c) => c.areaId === a.id).length;
+                  return (
+                    <TouchableOpacity
+                      key={a.id}
+                      style={[styles.dropdownOption, isSelected && styles.dropdownOptionSelected]}
+                      onPress={() => {
+                        setSelectedRateAreaId(a.id);
+                        setIsAreaRateDropdownOpen(false);
+                        const areaCusts = (masters?.customers || []).filter((c) => c.areaId === a.id);
+                        if (areaCusts.length > 0 && areaCusts[0].pricePerLiter) {
+                          setNewAreaRate(String(areaCusts[0].pricePerLiter));
+                        }
+                      }}
+                    >
+                      <View>
+                        <Text style={[styles.dropdownOptionText, isSelected && styles.dropdownOptionTextSelected]}>
+                          {a.name}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#64748B' }}>
+                          {custCount} customer{custCount === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+                      {isSelected && <Ionicons name="checkmark" size={16} color="#0060AF" />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* Area Info Chip */}
+            {selectedRateAreaId ? (
+              <View style={styles.areaRateInfoBanner}>
+                <Ionicons name="people" size={16} color="#0284C7" />
+                <Text style={styles.areaRateInfoBannerText}>
+                  Updates rate for all{' '}
+                  <Text style={{ fontWeight: '800' }}>
+                    {(masters?.customers || []).filter((c) => c.areaId === selectedRateAreaId).length}
+                  </Text>{' '}
+                  customer(s) in this area
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Rate Input Textbox */}
+            <Text style={styles.inputLabelModal}>New Rate per Litre (₹) *</Text>
+            <View style={styles.inlineEditRowModal}>
+              <Text style={styles.currencyPrefixModal}>₹</Text>
+              <TextInput
+                style={styles.rateInputModal}
+                keyboardType="numeric"
+                placeholder="e.g. 62.00"
+                placeholderTextColor="#94A3B8"
+                value={newAreaRate}
+                onChangeText={setNewAreaRate}
+              />
+              <Text style={styles.perLiterSuffix}>/ Litre</Text>
+            </View>
+
+            {areaRateError ? (
+              <View style={styles.areaRateErrorRow}>
+                <Ionicons name="alert-circle" size={14} color="#DC2626" />
+                <Text style={styles.areaRateErrorText}>{areaRateError}</Text>
+              </View>
+            ) : null}
+
+            {/* OK and Cancel Buttons */}
+            <View style={styles.modalFooterRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => {
+                  setAreaRateModalVisible(false);
+                  setIsAreaRateDropdownOpen(false);
+                  setAreaRateError('');
+                }}
+                disabled={isSavingAreaRate}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalOkBtn, isSavingAreaRate && styles.btnDisabled]}
+                onPress={handleSaveAreaRate}
+                disabled={isSavingAreaRate}
+                activeOpacity={0.8}
+              >
+                {isSavingAreaRate ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <CircleLoader size="small" color="#FFFFFF" />
+                    <Text style={styles.modalOkBtnText}>Updating...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.modalOkBtnText}>OK</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Confirmation Popup Modal */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={deleteModalVisible}
+        onRequestClose={() => {
+          if (!isDeletingItem) {
+            setDeleteModalVisible(false);
+            setDeleteItemTarget(null);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteConfirmCard}>
+            <View style={styles.deleteIconBadge}>
+              <Ionicons name="trash-outline" size={30} color="#DC2626" />
+            </View>
+
+            <Text style={styles.deleteConfirmTitle}>Confirm Delete</Text>
+            
+            <Text style={styles.deleteConfirmText}>
+              Are you sure you want to delete{' '}
+              <Text style={{ fontWeight: '800', color: '#0F172A' }}>
+                "{deleteItemTarget?.name}"
+              </Text>
+              ?
+            </Text>
+
+            {deleteItemTarget?.details ? (
+              <View style={styles.deleteDetailBadge}>
+                <Ionicons name="information-circle-outline" size={14} color="#64748B" />
+                <Text style={styles.deleteDetailText}>{deleteItemTarget.details}</Text>
+              </View>
+            ) : null}
+
+            <Text style={styles.deleteConfirmSubtext}>
+              This action cannot be undone and will permanently remove this record.
+            </Text>
+
+            <View style={styles.deleteActionBtnRow}>
+              <TouchableOpacity
+                style={styles.deleteCancelBtn}
+                onPress={() => {
+                  setDeleteModalVisible(false);
+                  setDeleteItemTarget(null);
+                }}
+                disabled={isDeletingItem}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.deleteCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.deleteConfirmBtn, isDeletingItem && styles.btnDisabled]}
+                onPress={handleExecuteDelete}
+                disabled={isDeletingItem}
+                activeOpacity={0.8}
+              >
+                {isDeletingItem ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <CircleLoader size="small" color="#FFFFFF" />
+                    <Text style={styles.deleteConfirmBtnText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.deleteConfirmBtnText}>OK</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <LoadingOverlay
-        visible={isSavingCustomer || isSavingArea || isSavingUser}
+        visible={isSavingCustomer || isSavingArea || isSavingUser || isDeletingItem || isSavingAreaRate}
         message="Saving changes to database..."
       />
     </SafeAreaView>
@@ -3189,5 +3584,274 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
     paddingHorizontal: 16,
+  },
+  headerIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteConfirmCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  deleteIconBadge: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  deleteConfirmTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  deleteConfirmText: {
+    fontSize: 14,
+    color: '#334155',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  deleteDetailBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  deleteDetailText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  deleteConfirmSubtext: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  deleteActionBtnRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  deleteCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#DC2626',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteConfirmBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  inlineEditRowModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 46,
+    backgroundColor: '#FFFFFF',
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  currencyPrefixModal: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0060AF',
+    marginRight: 6,
+  },
+  rateInputModal: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    height: '100%',
+  },
+  perLiterSuffix: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  modalFooterRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  modalCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  modalOkBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#0060AF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalOkBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  areaRateHeaderWrap: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  cardSubHeader: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  areaRateActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0060AF',
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  areaRateActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  areaRateList: {
+    gap: 10,
+  },
+  areaRateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+  },
+  areaRatePinBubble: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  areaRateName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  areaRateCustCount: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 3,
+  },
+  areaRateBadge: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  areaRateBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0060AF',
+  },
+  areaRateEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  areaRateEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0060AF',
+  },
+  areaRateInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  areaRateInfoBannerText: {
+    fontSize: 12,
+    color: '#0369A1',
+    flex: 1,
+  },
+  areaRateErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  areaRateErrorText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '600',
   },
 });

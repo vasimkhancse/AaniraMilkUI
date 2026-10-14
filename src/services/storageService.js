@@ -71,6 +71,42 @@ export const storageService = {
     }
   },
 
+  async updateAreaRate(areaId, pricePerLiter) {
+    const rateNum = Number(pricePerLiter);
+    const masters = await this.getMasters();
+
+    // 1. Update customers locally in masters
+    let updatedCusts = (masters.customers || []).map((c) => {
+      if (areaId === 'all' || c.areaId === areaId) {
+        return { ...c, pricePerLiter: rateNum };
+      }
+      return c;
+    });
+    masters.customers = updatedCusts;
+    await AsyncStorage.setItem(KEYS.MASTERS, JSON.stringify(masters));
+
+    // 2. Sync with backend API
+    try {
+      const response = await apiService.updateAreaRate(areaId, rateNum);
+      if (response && response.customers && Array.isArray(response.customers)) {
+        masters.customers = response.customers;
+        await AsyncStorage.setItem(KEYS.MASTERS, JSON.stringify(masters));
+      }
+    } catch (e) {
+      console.warn('Backend updateAreaRate failed, trying individual customer fallback:', e.message);
+      try {
+        const areaCusts = (masters.customers || []).filter(c => areaId === 'all' || c.areaId === areaId);
+        await Promise.allSettled(
+          areaCusts.map(c => apiService.saveCustomer({ ...c, pricePerLiter: rateNum }))
+        );
+      } catch (err2) {
+        console.warn('Fallback individual customer rate save error:', err2.message);
+      }
+    }
+
+    return masters;
+  },
+
   // Customers helpers
   async getCustomers(areaId = null) {
     try {
