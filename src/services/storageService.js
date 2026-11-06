@@ -365,7 +365,9 @@ export const storageService = {
       const newKeys = new Set(newDeliveries.map(d => `${d.customerId}_${d.date}_${d.shift}`));
       existing = existing.filter(d => !newKeys.has(`${d.customerId}_${d.date}_${d.shift}`));
 
-      const validNew = newDeliveries.filter(d => Number(d.qty) > 0);
+      const validNew = newDeliveries.filter(
+        (d) => d.qty !== undefined && d.qty !== null && !isNaN(Number(d.qty)) && Number(d.qty) >= 0
+      );
       const updated = [...existing, ...validNew];
       await AsyncStorage.setItem(KEYS.DELIVERIES, JSON.stringify(updated));
       return { success: true, count: validNew.length, updated };
@@ -428,7 +430,7 @@ export const storageService = {
     const customerSummaries = Object.values(customerMap)
       .map(c => ({
         ...c,
-        totalMilk: Number(c.totalMilk.toFixed(2)),
+        totalMilk: Math.round(c.totalMilk * 100) / 100,
         totalAmount: Math.round(c.totalAmount),
       }))
       .sort((a, b) => b.totalMilk - a.totalMilk);
@@ -440,7 +442,7 @@ export const storageService = {
     return {
       month: yearMonthStr,
       totalCustomers: activeCustomersCount,
-      totalMilk: Number(grandTotalMilk.toFixed(2)),
+      totalMilk: Math.round(grandTotalMilk * 100) / 100,
       totalAmount: grandTotalAmount,
       customerSummaries,
     };
@@ -469,7 +471,7 @@ export const storageService = {
       customer: customer || { id: customerId, name: 'Customer', phone: '+91 98765 43210' },
       month: yearMonthStr,
       entries,
-      totalMilk: Number(totalMilk.toFixed(2)),
+      totalMilk: Math.round(totalMilk * 100) / 100,
       totalAmount: Math.round(totalAmount),
     };
   },

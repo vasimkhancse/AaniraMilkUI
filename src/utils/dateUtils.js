@@ -158,3 +158,5 @@ export const getAvailableMonths = (
     };
   });
 };
+
+export { formatMilkQty } from './formatUtils';

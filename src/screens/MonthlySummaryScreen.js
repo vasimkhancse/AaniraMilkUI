@@ -16,6 +16,7 @@ import {
   getCurrentYearMonth,
   formatYearMonth,
   getAvailableMonths,
+  formatMilkQty,
 } from '../utils/dateUtils';
 
 export default function MonthlySummaryScreen({
@@ -191,7 +192,7 @@ export default function MonthlySummaryScreen({
                   <Ionicons name="water" size={20} color="#0060AF" />
                 </View>
                 <Text style={styles.statLabel}>Total Milk (L)</Text>
-                <Text style={styles.statValue}>{summaryData.totalMilk.toFixed(1)}</Text>
+                <Text style={styles.statValue}>{formatMilkQty(summaryData.totalMilk)}</Text>
               </View>
             </View>
 
@@ -262,7 +263,7 @@ export default function MonthlySummaryScreen({
                       <Text style={styles.customerSubText}>Tap to view bill ➔</Text>
                     </View>
                     <Text style={[styles.tableCell, styles.colMilk, styles.milkValueText]}>
-                      {c.totalMilk.toFixed(1)}
+                      {formatMilkQty(c.totalMilk)}
                     </Text>
                     <Text style={[styles.tableCell, styles.colAmount, styles.amountValueText]}>
                       ₹{c.totalAmount.toLocaleString('en-IN')}

@@ -18,6 +18,7 @@ import { storageService } from '../services/storageService';
 import { apiService } from '../services/apiService';
 import CircleLoader, { LoadingOverlay } from '../components/CircleLoader';
 import { useBackModal } from '../services/modalBackHandler';
+import { formatMilkQty } from '../utils/formatUtils';
 
 export default function MastersScreen({ masters, onUpdateMasters, onResetDemoData, onBack, onRefresh }) {
   const [activeTab, setActiveTab] = useState('customers'); // customers | rates | areas | users
@@ -845,12 +846,12 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                         <View style={styles.behaviorRow}>
                           <View style={styles.behaviorBadge}>
                             <Text style={styles.behaviorBadgeText}>
-                              ☀️ M: {c.defaultMorningQty ?? 1}L
+                              ☀️ M: {formatMilkQty(c.defaultMorningQty ?? 1)}L
                             </Text>
                           </View>
                           <View style={styles.behaviorBadge}>
                             <Text style={styles.behaviorBadgeText}>
-                              🌙 E: {c.defaultEveningQty ?? 0}L
+                              🌙 E: {formatMilkQty(c.defaultEveningQty ?? 0)}L
                             </Text>
                           </View>
                           <Text style={styles.rateBadgeText}>₹{c.pricePerLiter || 60}/L</Text>
@@ -1065,7 +1066,7 @@ export default function MastersScreen({ masters, onUpdateMasters, onResetDemoDat
                                     </View>
                                   </View>
                                   <Text style={styles.areaGroupDemandSummary}>
-                                    ☀️ Morning: {totalM.toFixed(1)}L  •  🌙 Evening: {totalE.toFixed(1)}L
+                                    ☀️ Morning: {formatMilkQty(totalM)}L  •  🌙 Evening: {formatMilkQty(totalE)}L
                                   </Text>
                                 </View>
                               </View>
@@ -2376,7 +2377,7 @@ function ReorderCustomerItem({
       <View style={styles.reorderItemInfo}>
         <Text style={styles.reorderItemName}>{cust.name}</Text>
         <Text style={styles.reorderItemSub}>
-          {cust.phone || 'No phone'} • ☀️ {cust.defaultMorningQty ?? 1}L | 🌙 {cust.defaultEveningQty ?? 0}L
+          {cust.phone || 'No phone'} • ☀️ {formatMilkQty(cust.defaultMorningQty ?? 1)}L | 🌙 {formatMilkQty(cust.defaultEveningQty ?? 0)}L
         </Text>
       </View>
 

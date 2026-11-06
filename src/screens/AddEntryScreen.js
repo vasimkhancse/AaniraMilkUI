@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
 import CalendarModal from '../components/CalendarModal';
-import { getTodayIso, formatDisplayDate } from '../utils/dateUtils';
+import { getTodayIso, formatDisplayDate, formatMilkQty } from '../utils/dateUtils';
 import CircleLoader, { LoadingOverlay } from '../components/CircleLoader';
 import { useBackModal } from '../services/modalBackHandler';
 
@@ -96,27 +96,35 @@ export default function AddEntryScreen({
       ? Number(c.defaultMorningQty ?? 0)
       : Number(c.defaultEveningQty ?? 0);
 
-    // Check if an existing saved delivery with qty > 0 exists for this customer on this date and shift
-    const hasPositiveSavedEntry = (deliveries || []).some((d) => {
+    // Check if an existing saved delivery exists for this customer on this date and shift (treat 0 as valid)
+    const hasSavedEntry = (deliveries || []).some((d) => {
       const dateMatches = d.date && d.date.slice(0, 10) === selectedDate.slice(0, 10);
       const shiftMatches =
         (d.shift || '').trim().toLowerCase() === (selectedShift || '').trim().toLowerCase();
-      return dateMatches && shiftMatches && d.customerId === c.id && Number(d.qty || 0) > 0;
+      return (
+        dateMatches &&
+        shiftMatches &&
+        d.customerId === c.id &&
+        d.qty !== undefined &&
+        d.qty !== null &&
+        !isNaN(Number(d.qty)) &&
+        Number(d.qty) >= 0
+      );
     });
 
-    return defaultShiftQty > 0 || hasPositiveSavedEntry;
+    return defaultShiftQty > 0 || hasSavedEntry;
   });
 
   // Map of customer ID to customer Area
   const customerAreaMap = new Map(allCustomers.map((c) => [c.id, c.areaId]));
 
-  // Check if entries are already saved for this DATE, SHIFT, AND AREA (positive quantities only)
+  // Check if entries are already saved for this DATE, SHIFT, AND AREA (including zero quantities)
   const existingDeliveriesForShiftAndArea = (deliveries || []).filter((d) => {
     const dateMatches = d.date && d.date.slice(0, 10) === selectedDate.slice(0, 10);
     const shiftMatches =
       (d.shift || '').trim().toLowerCase() === (selectedShift || '').trim().toLowerCase();
     if (!dateMatches || !shiftMatches) return false;
-    if (Number(d.qty || 0) <= 0) return false;
+    if (d.qty === undefined || d.qty === null || isNaN(Number(d.qty)) || Number(d.qty) < 0) return false;
 
     const custArea = d.areaId || customerAreaMap.get(d.customerId);
     if (selectedAreaFilter !== 'all') {
@@ -167,10 +175,11 @@ export default function AddEntryScreen({
 
     allCustomers.forEach((cust) => {
       const match = existing.find((e) => e.customerId === cust.id);
-      if (match && Number(match.qty) > 0) {
+      // Treat 0 as a valid quantity; do not fall back to default when a saved entry exists
+      if (match && match.qty !== undefined && match.qty !== null && !isNaN(Number(match.qty))) {
         newEntries[cust.id] = {
           qty: Number(match.qty),
-          rate: match.rate || cust.pricePerLiter || baseRate,
+          rate: match.rate !== undefined && match.rate !== null ? Number(match.rate) : (cust.pricePerLiter || baseRate),
         };
       } else {
         // Customer default behavior
@@ -190,18 +199,21 @@ export default function AddEntryScreen({
 
   // Adjust quantity
   const handleQtyChange = (customerId, newQty) => {
-    const validQty = Math.max(0, Number(newQty));
+    const validQty = Math.max(0, Math.round(Number(newQty) * 100) / 100);
     setEntriesMap((prev) => ({
       ...prev,
       [customerId]: {
         ...prev[customerId],
-        qty: Number(validQty.toFixed(2)),
+        qty: validQty,
       },
     }));
   };
 
   const handleStepQty = (customerId, step) => {
-    const current = entriesMap[customerId]?.qty || 0;
+    const current =
+      entriesMap[customerId]?.qty !== undefined && entriesMap[customerId]?.qty !== null
+        ? Number(entriesMap[customerId].qty)
+        : 0;
     const updated = Math.max(0, current + step);
     handleQtyChange(customerId, updated);
   };
@@ -223,9 +235,10 @@ export default function AddEntryScreen({
   // Calculate totals for currently displayed customers in table
   const activeEntries = filteredCustomers.map((c) => {
     const entry = entriesMap[c.id] || { qty: 0, rate: baseRate };
-    const qty = entry.qty || 0;
-    const amount = Math.round(qty * entry.rate);
-    return { customer: c, qty, rate: entry.rate, amount };
+    const qty = entry.qty !== undefined && entry.qty !== null ? Number(entry.qty) : 0;
+    const rate = entry.rate !== undefined && entry.rate !== null ? Number(entry.rate) : (c.pricePerLiter || baseRate);
+    const amount = Math.round(qty * rate);
+    return { customer: c, qty, rate, amount };
   });
 
   const totalDeliveredCustomers = activeEntries.filter((e) => e.qty > 0).length;
@@ -242,15 +255,17 @@ export default function AddEntryScreen({
     try {
       const batch = filteredCustomers.map((cust) => {
         const entry = entriesMap[cust.id] || { qty: 0, rate: baseRate };
+        const qty = entry.qty !== undefined && entry.qty !== null ? Number(entry.qty) : 0;
+        const rate = entry.rate !== undefined && entry.rate !== null ? Number(entry.rate) : (cust.pricePerLiter || baseRate);
         return {
           id: `del-${cust.id}-${selectedDate}-${selectedShift.toLowerCase()}`,
           customerId: cust.id,
           customerName: cust.name,
           date: selectedDate,
           shift: selectedShift,
-          qty: entry.qty,
-          rate: entry.rate,
-          amount: Math.round(entry.qty * entry.rate),
+          qty: qty,
+          rate: rate,
+          amount: Math.round(qty * rate),
           supplyBoyId: currentUser?.name || currentUser?.id || 'Staff',
           areaId: cust.areaId,
           recordedAt: new Date().toISOString(),
@@ -278,10 +293,11 @@ export default function AddEntryScreen({
     const isMorning = (selectedShift || '').toLowerCase() === 'morning';
     allCustomers.forEach((cust) => {
       const match = existingDeliveriesForShiftAndArea.find((e) => e.customerId === cust.id);
-      if (match && Number(match.qty) > 0) {
+      // Reset to saved quantity even if 0, do not fall back to default
+      if (match && match.qty !== undefined && match.qty !== null && !isNaN(Number(match.qty))) {
         resetMap[cust.id] = {
           qty: Number(match.qty),
-          rate: match.rate || cust.pricePerLiter || baseRate,
+          rate: match.rate !== undefined && match.rate !== null ? Number(match.rate) : (cust.pricePerLiter || baseRate),
         };
       } else {
         const defaultQty = isMorning
@@ -420,7 +436,7 @@ export default function AddEntryScreen({
               <View style={styles.savedMetricDivider} />
               <View style={styles.savedMetricBox}>
                 <Text style={styles.savedMetricLabel}>Total Milk</Text>
-                <Text style={styles.savedMetricValue}>{savedTotalMilk.toFixed(1)} L</Text>
+                <Text style={styles.savedMetricValue}>{formatMilkQty(savedTotalMilk)} L</Text>
               </View>
               <View style={styles.savedMetricDivider} />
               <View style={styles.savedMetricBox}>
@@ -470,6 +486,8 @@ export default function AddEntryScreen({
                 displayedSavedDeliveries.map((del, idx) => {
                   const cust = customerMap.get(del.customerId);
                   const custSeq = cust?.sequence !== undefined ? Number(cust.sequence) : (Number(del.sequence) || 0);
+                  const delQty = del.qty !== undefined && del.qty !== null ? Number(del.qty) : 0;
+                  const isZero = delQty === 0;
 
                   return (
                     <View key={del.id || idx} style={[styles.savedTableRow, idx % 2 === 1 && styles.savedTableRowAlt]}>
@@ -487,12 +505,12 @@ export default function AddEntryScreen({
                         ) : null}
                       </View>
                       <View style={{ width: 70, alignItems: 'center' }}>
-                        <View style={styles.savedQtyChip}>
-                          <Text style={styles.savedQtyChipText}>{del.qty} L</Text>
+                        <View style={[styles.savedQtyChip, isZero && styles.savedQtyChipZero]}>
+                          <Text style={[styles.savedQtyChipText, isZero && styles.savedQtyChipTextZero]}>{formatMilkQty(delQty)} L</Text>
                         </View>
                       </View>
                       <Text style={[styles.savedCellText, { width: 75, textAlign: 'right', fontWeight: '800', color: '#0060AF' }]}>
-                        ₹{del.amount}
+                        ₹{del.amount ?? 0}
                       </Text>
                     </View>
                   );
@@ -590,8 +608,9 @@ export default function AddEntryScreen({
               ) : (
                 filteredCustomers.map((cust, idx) => {
                   const entry = entriesMap[cust.id] || { qty: 0, rate: baseRate };
-                  const qty = entry.qty || 0;
-                  const amount = Math.round(qty * entry.rate);
+                  const qty = entry.qty !== undefined && entry.qty !== null ? Number(entry.qty) : 0;
+                  const rate = entry.rate !== undefined && entry.rate !== null ? Number(entry.rate) : (cust.pricePerLiter || baseRate);
+                  const amount = Math.round(qty * rate);
                   const isZero = qty === 0;
 
                   return (
@@ -617,7 +636,7 @@ export default function AddEntryScreen({
                           activeOpacity={0.7}
                         >
                           <Text style={[styles.qtyBadgeText, isZero && styles.qtyBadgeTextZero]}>
-                            {qty} L
+                            {formatMilkQty(qty)} L
                           </Text>
                           <Ionicons
                             name="pencil"
@@ -662,7 +681,7 @@ export default function AddEntryScreen({
               <View style={styles.summaryDivider} />
               <View style={styles.summaryCol}>
                 <Text style={styles.summaryLabel}>Total Milk (L)</Text>
-                <Text style={styles.summaryValue}>{totalMilkLitres.toFixed(1)}</Text>
+                <Text style={styles.summaryValue}>{formatMilkQty(totalMilkLitres)}</Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryCol}>
@@ -747,7 +766,9 @@ export default function AddEntryScreen({
               {/* Quantity Presets */}
               <View style={styles.presetGrid}>
                 {quantityPresets.map((preset) => {
-                  const isSelected = (entriesMap[activeModalCustomer.id]?.qty || 0) === preset.value;
+                  const currentQty = entriesMap[activeModalCustomer.id]?.qty;
+                  const isSelected =
+                    (currentQty !== undefined && currentQty !== null ? Number(currentQty) : 0) === preset.value;
                   return (
                     <TouchableOpacity
                       key={preset.label}
@@ -779,7 +800,7 @@ export default function AddEntryScreen({
                   style={styles.applyCustomBtn}
                   onPress={() => {
                     const num = parseFloat(modalCustomQty);
-                    if (!isNaN(num)) {
+                    if (!isNaN(num) && num >= 0) {
                       handleQtyChange(activeModalCustomer.id, num);
                     }
                     setActiveModalCustomer(null);
@@ -1104,10 +1125,18 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 8,
   },
+  savedQtyChipZero: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
   savedQtyChipText: {
     fontSize: 11,
     fontWeight: '800',
     color: '#0060AF',
+  },
+  savedQtyChipTextZero: {
+    color: '#64748B',
   },
   bigEditBtn: {
     backgroundColor: '#0060AF',

@@ -19,6 +19,7 @@ import {
   formatYearMonth,
   formatDisplayDate,
   getAvailableMonths,
+  formatMilkQty,
 } from '../utils/dateUtils';
 import { useBackModal } from '../services/modalBackHandler';
 
@@ -94,7 +95,7 @@ export default function CustomerBillScreen({
   // Generate formatted WhatsApp message text
   const generateWhatsAppMessage = () => {
     const rawLines = entries.map(
-      (e) => `• ${formatDisplayDate(e.date)} (${e.shift}): ${e.qty}L - ₹${e.amount}`
+      (e) => `• ${formatDisplayDate(e.date)} (${e.shift}): ${formatMilkQty(e.qty)}L - ₹${e.amount}`
     );
     const summaryLines = rawLines.slice(0, 15).join('\n');
     const moreText = entries.length > 15 ? `\n...and ${entries.length - 15} more deliveries` : '';
@@ -111,7 +112,7 @@ _Fresh Milk • Healthy Family_
 *Delivery Breakdown:*
 ${summaryLines}${moreText}
 ----------------------------------
-📊 *Total Milk Supplied:* ${totalMilk.toFixed(1)} Litres
+📊 *Total Milk Supplied:* ${formatMilkQty(totalMilk)} Litres
 💰 *TOTAL AMOUNT DUE:* ₹${totalAmount.toLocaleString('en-IN')}
 ----------------------------------
 💳 *Payment Methods:*
@@ -266,7 +267,7 @@ ${summaryLines}${moreText}
                     </View>
 
                     <Text style={[styles.tableCell, styles.colQty, styles.qtyText]}>
-                      {entry.qty}
+                      {formatMilkQty(entry.qty)}
                     </Text>
 
                     <Text style={[styles.tableCell, styles.colAmount, styles.amountText]}>
@@ -281,7 +282,7 @@ ${summaryLines}${moreText}
             <View style={styles.totalsCard}>
               <View style={styles.totalCol}>
                 <Text style={styles.totalLabel}>Total Milk (L)</Text>
-                <Text style={styles.totalValueMilk}>{totalMilk.toFixed(1)}</Text>
+                <Text style={styles.totalValueMilk}>{formatMilkQty(totalMilk)}</Text>
               </View>
               <View style={styles.totalDivider} />
               <View style={styles.totalCol}>
