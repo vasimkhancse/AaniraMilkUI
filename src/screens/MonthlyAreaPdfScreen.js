@@ -191,12 +191,21 @@ export default function MonthlyAreaPdfScreen({
       const res = await shareSummaryViaWhatsApp({ matrixData, filename });
 
       if (Platform.OS === 'web') {
-        setStatusModal({
-          visible: true,
-          title: 'Ready to Share!',
-          message: 'The PDF has been downloaded to your computer and WhatsApp Web has opened with your monthly summary. You can now send the message and attach the downloaded PDF file.',
-          type: 'success',
-        });
+        if (res.method === 'web_share_api_file') {
+          setStatusModal({
+            visible: true,
+            title: 'PDF Shared Successfully!',
+            message: 'The PDF report file and delivery summary have been sent via WhatsApp.',
+            type: 'success',
+          });
+        } else if (res.method !== 'user_cancelled') {
+          setStatusModal({
+            visible: true,
+            title: 'PDF Downloaded & WhatsApp Opened',
+            message: `The PDF file "${filename}" has been downloaded to your computer and WhatsApp Web is open. Simply drag or attach the downloaded PDF into your WhatsApp chat.`,
+            type: 'success',
+          });
+        }
       }
     } catch (err) {
       console.error('WhatsApp share error:', err);

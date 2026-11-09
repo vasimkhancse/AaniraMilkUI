@@ -708,7 +708,7 @@ export const shareSummaryViaWhatsApp = async ({ matrixData, filename, targetPhon
   const encodedText = encodeURIComponent(summaryText);
   const webWhatsappUrl = phoneParam
     ? `https://web.whatsapp.com/send?phone=${phoneParam}&text=${encodedText}`
-    : `https://web.whatsapp.com/send?text=${encodedText}`;
+    : `https://wa.me/?text=${encodedText}`;
   const mobileWhatsappUrl = phoneParam
     ? `whatsapp://send?phone=${phoneParam}&text=${encodedText}`
     : `whatsapp://send?text=${encodedText}`;
@@ -717,24 +717,71 @@ export const shareSummaryViaWhatsApp = async ({ matrixData, filename, targetPhon
     : `https://wa.me/?text=${encodedText}`;
 
   if (Platform.OS === 'web') {
-    // 1. Try to download the PDF file first so the user has the file ready to attach
+    let pdfBlob = null;
+    let pdfFile = null;
+
     try {
       const doc = await generateWebLandscapePdfDoc(matrixData);
-      if (doc && doc.save) {
-        doc.save(safeFilename);
+      if (doc) {
+        pdfBlob = doc.output('blob');
+        if (typeof File !== 'undefined' && pdfBlob) {
+          pdfFile = new File([pdfBlob], safeFilename, { type: 'application/pdf' });
+        }
       }
     } catch (e) {
-      console.warn('PDF download warning before WhatsApp share:', e);
+      console.warn('Error generating PDF blob for web share:', e);
     }
 
-    // 2. Open WhatsApp Web or wa.me
+    // 1. If Web Share API with File attachment is supported (Mobile browsers, macOS Safari, Windows Edge)
+    if (pdfFile && typeof navigator !== 'undefined' && navigator.canShare) {
+      try {
+        if (navigator.canShare({ files: [pdfFile] })) {
+          await navigator.share({
+            files: [pdfFile],
+            title: 'Aanira Milk Monthly Summary',
+            text: summaryText,
+          });
+          return {
+            success: true,
+            method: 'web_share_api_file',
+            filename: safeFilename,
+            message: 'PDF file and summary shared successfully!',
+          };
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          return { success: true, method: 'user_cancelled' };
+        }
+        console.warn('Web Share API with file failed, falling back to download + web whatsapp:', err);
+      }
+    }
+
+    // 2. Desktop Browsers: Automatically download the PDF file so user has it ready
+    try {
+      if (pdfBlob) {
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = safeFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      }
+    } catch (e) {
+      console.warn('PDF download before WhatsApp share failed:', e);
+    }
+
+    // 3. Open WhatsApp Web or wa.me with the full formatted summary
     if (typeof window !== 'undefined') {
       window.open(webWhatsappUrl, '_blank') || window.open(universalUrl, '_blank');
     }
+
     return {
       success: true,
-      method: 'web_whatsapp_url',
-      message: 'WhatsApp Web opened with summary details.',
+      method: 'web_whatsapp_download_and_open',
+      filename: safeFilename,
+      message: 'PDF downloaded! WhatsApp Web opened with complete summary.',
     };
   }
 
