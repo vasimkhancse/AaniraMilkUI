@@ -19,6 +19,7 @@ import AaniraLogo from './src/components/AaniraLogo';
 import LoginScreen from './src/screens/LoginScreen';
 import AddEntryScreen from './src/screens/AddEntryScreen';
 import MonthlySummaryScreen from './src/screens/MonthlySummaryScreen';
+import MonthlyAreaPdfScreen from './src/screens/MonthlyAreaPdfScreen';
 import CustomerBillScreen from './src/screens/CustomerBillScreen';
 import MastersScreen from './src/screens/MastersScreen';
 import { getCurrentYearMonth } from './src/utils/dateUtils';
@@ -34,6 +35,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('entry'); // 'entry' | 'summary' | 'bill' | 'masters'
   const [selectedCustomerIdForBill, setSelectedCustomerIdForBill] = useState('cust-2'); // Ravi by default
   const [selectedBillMonth, setSelectedBillMonth] = useState(getCurrentYearMonth());
+  const [selectedAreaForPdf, setSelectedAreaForPdf] = useState('all');
   const [masters, setMasters] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
   const [deviceFrameMode, setDeviceFrameMode] = useState(width > 768);
@@ -86,6 +88,9 @@ export default function App() {
     if (screenInfo.month) {
       setSelectedBillMonth(screenInfo.month);
     }
+    if (screenInfo.areaId) {
+      setSelectedAreaForPdf(screenInfo.areaId);
+    }
     setRefreshKey((prev) => prev + 1);
     refreshAppData();
   };
@@ -96,7 +101,8 @@ export default function App() {
       current &&
       current.tab === screenInfo.tab &&
       current.customerId === screenInfo.customerId &&
-      current.month === screenInfo.month
+      current.month === screenInfo.month &&
+      current.areaId === screenInfo.areaId
     ) {
       return;
     }
@@ -305,8 +311,26 @@ export default function App() {
             currentUser={currentUser}
             deliveries={deliveries}
             onSelectCustomerBill={handleNavigateToCustomerBill}
+            onOpenAreaPdf={(month, areaId) =>
+              navigateTo({
+                tab: 'area-pdf',
+                month: month || selectedBillMonth,
+                areaId: areaId || selectedAreaForPdf,
+              })
+            }
             onBack={() => handleGoBack(true)}
             onRefresh={refreshAppData}
+          />
+        );
+      case 'area-pdf':
+        return (
+          <MonthlyAreaPdfScreen
+            key={screenKey}
+            month={selectedBillMonth}
+            initialAreaId={selectedAreaForPdf || 'all'}
+            masters={masters}
+            deliveries={deliveries}
+            onBack={() => handleGoBack(true)}
           />
         );
       case 'bill':

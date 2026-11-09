@@ -182,6 +182,13 @@ export const apiService = {
     return request(`/reports/monthly-summary?${params.toString()}`);
   },
 
+  async getMonthlyAreaMatrix(month, areaId = 'all') {
+    const params = new URLSearchParams();
+    if (month) params.append('month', month);
+    if (areaId && areaId !== 'all') params.append('areaId', areaId);
+    return request(`/reports/monthly-area-matrix?${params.toString()}`);
+  },
+
   async getCustomerMonthlyBill(customerId, month) {
     const params = new URLSearchParams({ customerId, month });
     return request(`/reports/customer-bill?${params.toString()}`);

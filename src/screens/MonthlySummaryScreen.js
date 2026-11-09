@@ -7,11 +7,14 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AppHeader from '../components/AppHeader';
 import { storageService } from '../services/storageService';
 import CircleLoader from '../components/CircleLoader';
+import MonthlyAreaPdfScreen from './MonthlyAreaPdfScreen';
+import { useBackModal } from '../services/modalBackHandler';
 import {
   getCurrentYearMonth,
   formatYearMonth,
@@ -21,12 +24,15 @@ import {
 
 export default function MonthlySummaryScreen({
   onSelectCustomerBill,
+  onOpenAreaPdf,
   onBack,
   deliveries,
   masters,
   currentUser,
 }) {
   const [selectedYearMonth, setSelectedYearMonth] = useState(getCurrentYearMonth());
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  useBackModal(showPdfModal, () => setShowPdfModal(false));
   
   const isAdmin = currentUser?.role === 'admin';
   const userAssignedArea = currentUser?.assignedArea && currentUser.assignedArea !== 'all' ? currentUser.assignedArea : 'area-1';
@@ -209,6 +215,29 @@ export default function MonthlySummaryScreen({
               </View>
             </View>
 
+            {/* Monthly Area-Wise PDF Summary Launch Banner */}
+            <TouchableOpacity
+              style={styles.pdfReportCard}
+              onPress={() => {
+                if (onOpenAreaPdf) {
+                  onOpenAreaPdf(selectedYearMonth, selectedAreaFilter);
+                } else {
+                  setShowPdfModal(true);
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.pdfIconCircle}>
+                <Ionicons name="document-text" size={24} color="#FFFFFF" />
+              </View>
+              <View style={styles.pdfTextContainer}>
+                <View style={styles.pdfTitleRow}>
+                  <Text style={styles.pdfTitle}>Monthly Area-Wise PDF Summary</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward-circle" size={26} color="#0060AF" />
+            </TouchableOpacity>
+
             {/* Customer Wise Summary Header */}
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Customer Wise Summary</Text>
@@ -275,6 +304,21 @@ export default function MonthlySummaryScreen({
           </>
         )}
       </ScrollView>
+
+      {/* Monthly Area-Wise PDF Modal Fallback */}
+      <Modal
+        visible={showPdfModal}
+        animationType="slide"
+        onRequestClose={() => setShowPdfModal(false)}
+      >
+        <MonthlyAreaPdfScreen
+          month={selectedYearMonth}
+          initialAreaId={selectedAreaFilter}
+          masters={masters}
+          deliveries={deliveries}
+          onBack={() => setShowPdfModal(false)}
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -441,6 +485,65 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#0060AF',
     letterSpacing: -0.5,
+  },
+  pdfReportCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: '#0060AF',
+    shadowColor: '#0060AF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  pdfIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#0060AF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  pdfTextContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
+  pdfTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  pdfTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  pdfBadgeLandscape: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  pdfBadgeLandscapeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#0060AF',
+  },
+  pdfSub: {
+    fontSize: 11,
+    color: '#64748B',
+    lineHeight: 15,
   },
   sectionHeaderRow: {
     flexDirection: 'row',

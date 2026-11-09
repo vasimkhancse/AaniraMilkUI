@@ -448,6 +448,131 @@ export const storageService = {
     };
   },
 
+  async getMonthlyAreaMatrix(yearMonthStr, areaId = 'all') {
+    try {
+      const matrix = await apiService.getMonthlyAreaMatrix(yearMonthStr, areaId);
+      if (matrix && matrix.areas) return matrix;
+    } catch (e) {
+      console.warn('Backend error in getMonthlyAreaMatrix, calculating locally:', e);
+    }
+
+    // Local calculation from stored deliveries and masters
+    const allDeliveries = await this.getDeliveries();
+    const masters = await this.getMasters();
+
+    const [yearStr, monthStr] = yearMonthStr.split('-');
+    const year = parseInt(yearStr, 10);
+    const monthNum = parseInt(monthStr, 10);
+    const daysInMonth = new Date(year, monthNum, 0).getDate();
+
+    let areaList = masters.areas || [];
+    if (areaId && areaId !== 'all') {
+      areaList = areaList.filter(a => a.id === areaId);
+    }
+
+    const allCustomers = masters.customers || [];
+    const filteredCustomers = allCustomers.filter(
+      c => c.active !== false && (areaId === 'all' || c.areaId === areaId)
+    );
+
+    // Map month deliveries
+    const monthDeliveries = allDeliveries.filter(d => d.date && d.date.startsWith(yearMonthStr));
+    const deliveryMap = {};
+    monthDeliveries.forEach(d => {
+      if (!deliveryMap[d.customerId]) deliveryMap[d.customerId] = {};
+      const cur = deliveryMap[d.customerId][d.date] || 0;
+      deliveryMap[d.customerId][d.date] = Math.round((cur + Number(d.qty || 0)) * 100) / 100;
+    });
+
+    const areaMap = {};
+    areaList.forEach(a => {
+      areaMap[a.id] = {
+        areaId: a.id,
+        areaName: a.name,
+        customers: [],
+        dayTotals: Array(daysInMonth).fill(0),
+        totalMilk: 0,
+        totalAmount: 0,
+      };
+    });
+
+    const defaultAreaId = areaList[0]?.id || 'area-1';
+
+    filteredCustomers.forEach(c => {
+      const aId = c.areaId && areaMap[c.areaId] ? c.areaId : defaultAreaId;
+      if (!areaMap[aId]) {
+        areaMap[aId] = {
+          areaId: aId,
+          areaName: aId,
+          customers: [],
+          dayTotals: Array(daysInMonth).fill(0),
+          totalMilk: 0,
+          totalAmount: 0,
+        };
+      }
+
+      const dailyQuantities = [];
+      let custTotalMilk = 0;
+      const custDeliveryMap = deliveryMap[c.id] || {};
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dayStr = String(day).padStart(2, '0');
+        const dateKey = `${yearMonthStr}-${dayStr}`;
+        const dayQty = custDeliveryMap[dateKey] || 0;
+        dailyQuantities.push(dayQty);
+        custTotalMilk += dayQty;
+        areaMap[aId].dayTotals[day - 1] += dayQty;
+      }
+
+      custTotalMilk = Math.round(custTotalMilk * 100) / 100;
+      const rate = Number(c.pricePerLiter) || Number(masters.milkRatePerLiter) || 60;
+      const custTotalAmount = Math.round(custTotalMilk * rate);
+
+      areaMap[aId].totalMilk += custTotalMilk;
+      areaMap[aId].totalAmount += custTotalAmount;
+
+      areaMap[aId].customers.push({
+        customerId: c.id,
+        customerName: c.name,
+        phone: c.phone || '',
+        areaId: c.areaId,
+        sequence: c.sequence || 0,
+        pricePerLiter: rate,
+        dailyQuantities,
+        totalMilk: custTotalMilk,
+        totalAmount: custTotalAmount,
+      });
+    });
+
+    const grandDayTotals = Array(daysInMonth).fill(0);
+    let grandTotalMilk = 0;
+    let grandTotalAmount = 0;
+
+    const populatedAreas = Object.values(areaMap).map(a => {
+      a.totalMilk = Math.round(a.totalMilk * 100) / 100;
+      a.dayTotals = a.dayTotals.map(v => Math.round(v * 100) / 100);
+      a.dayTotals.forEach((val, idx) => {
+        grandDayTotals[idx] += val;
+      });
+      grandTotalMilk += a.totalMilk;
+      grandTotalAmount += a.totalAmount;
+      // Sort customers by sequence then name
+      a.customers.sort((x, y) => (x.sequence || 0) - (y.sequence || 0) || (x.customerName || '').localeCompare(y.customerName || ''));
+      return a;
+    });
+
+    return {
+      month: yearMonthStr,
+      daysInMonth,
+      areas: populatedAreas,
+      grandTotals: {
+        dayTotals: grandDayTotals.map(v => Math.round(v * 100) / 100),
+        totalMilk: Math.round(grandTotalMilk * 100) / 100,
+        totalAmount: grandTotalAmount,
+      },
+    };
+  },
+
   async getCustomerMonthlyBill(customerId, yearMonthStr) {
     try {
       const bill = await apiService.getCustomerMonthlyBill(customerId, yearMonthStr);
